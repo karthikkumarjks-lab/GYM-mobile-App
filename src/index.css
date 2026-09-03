@@ -1,0 +1,45 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --accent: #f5533d;
+  --accent-soft: #ffece8;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: theme("colors.paper");
+  color: theme("colors.ink");
+  font-family: theme("fontFamily.sans");
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer components {
+  .card {
+    @apply bg-card border border-line rounded-2xl;
+  }
+  .btn {
+    @apply bg-accent text-white font-bold rounded-xl px-4 py-3 text-sm text-center
+           disabled:opacity-50 transition active:scale-[.98];
+  }
+  .btn-ghost {
+    @apply bg-card text-ink border border-line font-bold rounded-xl px-4 py-3 text-sm;
+  }
+  .pill {
+    @apply text-[11px] font-bold px-2 py-1 rounded-full whitespace-nowrap;
+  }
+  .field {
+    @apply w-full bg-card border border-line rounded-xl px-3.5 py-3 text-[15px]
+           outline-none focus:border-accent;
+  }
+  .eyebrow {
+    @apply text-[11px] font-extrabold tracking-[0.12em] uppercase text-muted;
+  }
+}
