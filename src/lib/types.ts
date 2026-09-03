@@ -7,6 +7,20 @@ export interface Gym {
   city?: string;
   logo_url?: string | null;
   accent: string;
+  webhook_secret?: string;
+}
+
+export interface Payment {
+  id: string;
+  gym_id: string;
+  member_id: string | null;
+  amount_paise: number;
+  purpose: string | null;
+  provider: string;
+  provider_ref: string | null;
+  status: "created" | "paid" | "failed" | "simulated";
+  link_url: string | null;
+  created_at: string;
 }
 
 export interface Member {

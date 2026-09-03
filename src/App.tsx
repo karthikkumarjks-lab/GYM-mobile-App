@@ -7,6 +7,7 @@ import OwnerShell from "./owner/OwnerShell";
 import Dashboard from "./owner/Dashboard";
 import Members from "./owner/Members";
 import WinBack from "./owner/WinBack";
+import Payments from "./owner/Payments";
 import Branding from "./owner/Branding";
 
 import MemberShell from "./member/MemberShell";
@@ -44,6 +45,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="members" element={<Members />} />
           <Route path="winback" element={<WinBack />} />
+          <Route path="payments" element={<Payments />} />
           <Route path="branding" element={<Branding />} />
         </Route>
 

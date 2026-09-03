@@ -1,0 +1,15 @@
+{
+  "name": "Iron House Gym",
+  "short_name": "Iron House",
+  "description": "Your gym, in your pocket — check in, training, progress.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#EEF0F3",
+  "theme_color": "#F5533D",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

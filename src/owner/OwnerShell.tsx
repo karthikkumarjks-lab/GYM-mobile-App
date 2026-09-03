@@ -7,6 +7,7 @@ const tabs = [
   { to: "/owner", label: "Dashboard", end: true },
   { to: "/owner/members", label: "Members" },
   { to: "/owner/winback", label: "Win-back" },
+  { to: "/owner/payments", label: "Payments" },
   { to: "/owner/branding", label: "Branding" },
 ];
 

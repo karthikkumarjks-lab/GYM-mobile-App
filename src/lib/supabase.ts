@@ -9,6 +9,8 @@ const FALLBACK_KEY = "sb_publishable_1OoPOLlQKVNNvcuxLxhE2g_gz_wjE6d";
 const url = (import.meta.env.VITE_SUPABASE_URL as string) || FALLBACK_URL;
 const key = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || FALLBACK_KEY;
 
+export const supabaseUrl = url;
+export const functionsUrl = `${url}/functions/v1`;
 export const hasSupabase = Boolean(url && key);
 
 export const supabase = hasSupabase

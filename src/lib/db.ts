@@ -8,8 +8,23 @@
 import { buildSeed, seedGym } from "./seed";
 import { hasSupabase, supabase } from "./supabase";
 import type {
-  Checkin, Gym, Meal, Member, MemberWithSignal, Message, Plan, Session,
+  Checkin, Gym, Meal, Member, MemberWithSignal, Message, Payment, Plan, Session,
 } from "./types";
+
+export interface MealEstimate {
+  configured: boolean;
+  label?: string;
+  kcal?: number;
+  protein_g?: number;
+  carbs_g?: number;
+  fat_g?: number;
+  error?: string;
+}
+export interface FeeInput {
+  member_id?: string | null;
+  amount_paise: number;
+  purpose?: string;
+}
 
 // ---------- shared pure logic ----------
 function signalsFrom(members: Member[], checkins: Checkin[]): MemberWithSignal[] {
@@ -241,6 +256,23 @@ const mockDb = {
     wr(K.meals, [...rd<Meal[]>(K.meals, []), row]);
     return row;
   },
+  async scanMeal(_image: string): Promise<MealEstimate> {
+    return { configured: false };
+  },
+  async listPayments(): Promise<Payment[]> {
+    return rd<Payment[]>("mg.payments", []).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+  },
+  async collectFee(input: FeeInput): Promise<{ configured: boolean; payment: Payment }> {
+    const g = rd<Gym>(K.gym, seedGym);
+    const row: Payment = {
+      id: uid(), gym_id: g.id, member_id: input.member_id ?? null,
+      amount_paise: input.amount_paise, purpose: input.purpose ?? "Gym fee",
+      provider: "razorpay", provider_ref: null, status: "simulated",
+      link_url: "https://rzp.io/demo/" + uid().slice(0, 8), created_at: new Date().toISOString(),
+    };
+    wr("mg.payments", [...rd<Payment[]>("mg.payments", []), row]);
+    return { configured: false, payment: row };
+  },
 };
 
 /* ========================================================= SUPABASE ======== */
@@ -382,7 +414,19 @@ const supaDb = {
     for (const s of signals) {
       if (s.risk !== "at_risk" || recent(s.id)) continue;
       const { template, body } = draftFor(s, gym);
-      created.push(await supaDb.queueWinback(s.id, body, template));
+      const msg = await supaDb.queueWinback(s.id, body, template);
+      // Try to actually send if WhatsApp is connected. Fake demo phone numbers will
+      // just come back not-ok, so the message stays "simulated" — which is correct.
+      if (s.phone) {
+        try {
+          const { data } = await supabase.functions.invoke("whatsapp-send", { body: { to: s.phone, body } });
+          if ((data as { ok?: boolean })?.ok) {
+            await supabase.from("messages").update({ status: "sent" }).eq("id", msg.id);
+            msg.status = "sent";
+          }
+        } catch { /* keep simulated */ }
+      }
+      created.push(msg);
     }
     return created;
   },
@@ -402,6 +446,24 @@ const supaDb = {
       .single();
     if (error) throw error;
     return data as Meal;
+  },
+  async scanMeal(image: string): Promise<MealEstimate> {
+    const { data, error } = await supabase.functions.invoke("meal-scan", { body: { image } });
+    if (error || !data) return { configured: false, error: error?.message };
+    return data as MealEstimate;
+  },
+  async listPayments(): Promise<Payment[]> {
+    const { data } = await supabase
+      .from("payments")
+      .select("*")
+      .eq("gym_id", requireGymId())
+      .order("created_at", { ascending: false });
+    return (data ?? []) as Payment[];
+  },
+  async collectFee(input: FeeInput): Promise<{ configured: boolean; payment: Payment }> {
+    const { data, error } = await supabase.functions.invoke("razorpay-link", { body: input });
+    if (error) throw error;
+    return data as { configured: boolean; payment: Payment };
   },
 };
 

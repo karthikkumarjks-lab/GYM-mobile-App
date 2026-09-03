@@ -148,3 +148,32 @@ create policy meal_write on meals for insert with check (
   gym_id = auth_gym_id()
   and (auth_role() in ('owner','staff') or member_id = auth_member_id())
 );
+
+-- ---------- integrations (added later) ----------
+alter table members add column if not exists biometric_id text;
+create index if not exists members_biometric on members (gym_id, biometric_id);
+
+alter table gyms add column if not exists webhook_secret text not null
+  default replace(gen_random_uuid()::text, '-', '');
+
+create table if not exists payments (
+  id           uuid primary key default gen_random_uuid(),
+  gym_id       uuid not null references gyms(id) on delete cascade,
+  member_id    uuid references members(id) on delete set null,
+  amount_paise int not null,
+  purpose      text,
+  provider     text not null default 'razorpay',
+  provider_ref text,
+  status       text not null default 'created' check (status in ('created','paid','failed','simulated')),
+  link_url     text,
+  created_at   timestamptz default now()
+);
+create index if not exists payments_gym on payments (gym_id, created_at desc);
+alter table payments enable row level security;
+create policy pay_read  on payments for select using (gym_id = auth_gym_id());
+create policy pay_write on payments for all
+  using (gym_id = auth_gym_id() and auth_role() in ('owner','staff'))
+  with check (gym_id = auth_gym_id() and auth_role() in ('owner','staff'));
+
+-- Edge functions: supabase/functions/{device-checkin, meal-scan, whatsapp-send, razorpay-link}
+-- Secrets they need are in supabase/SETUP.md.

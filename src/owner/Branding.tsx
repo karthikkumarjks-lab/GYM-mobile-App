@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { db } from "../lib/db";
+import { functionsUrl } from "../lib/supabase";
 import type { Gym } from "../lib/types";
 import { Loading } from "../components/ui";
 
@@ -75,7 +76,38 @@ export default function Branding() {
           {gym.name.slice(0, 2).toUpperCase()}
         </div>
         <div className="text-sm text-muted">
-          Logo upload comes with the real backend. For now the initials + your colour stand in.
+          Logo upload comes with file storage. For now the initials + your colour stand in.
+        </div>
+      </div>
+
+      <h2 className="text-xl font-extrabold mt-4">Biometric device</h2>
+      <p className="text-sm text-muted">
+        Point your ESSL / ZKTeco cloud push (or middleware like CAMS) at this URL. Each punch
+        becomes a check-in. Match members by their device enrol id, phone, or member id.
+      </p>
+      <div className="card p-4 flex flex-col gap-3 text-xs">
+        <div>
+          <div className="eyebrow mb-1">Webhook URL</div>
+          <code className="block bg-paper rounded-lg p-2 break-all">
+            {functionsUrl}/device-checkin
+          </code>
+        </div>
+        <div>
+          <div className="eyebrow mb-1">Headers</div>
+          <code className="block bg-paper rounded-lg p-2 break-all">
+            x-gym-code: {gym.code}
+            <br />
+            x-webhook-secret: {gym.webhook_secret ?? "—"}
+          </code>
+        </div>
+        <div>
+          <div className="eyebrow mb-1">Test it</div>
+          <code className="block bg-paper rounded-lg p-2 break-all whitespace-pre-wrap">
+{`curl -X POST ${functionsUrl}/device-checkin \\
+ -H "x-gym-code: ${gym.code}" \\
+ -H "x-webhook-secret: ${gym.webhook_secret ?? "SECRET"}" \\
+ -d '{"biometric_id":"ENROLL-0003","method":"fingerprint"}'`}
+          </code>
         </div>
       </div>
     </div>

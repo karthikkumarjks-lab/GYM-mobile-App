@@ -3,8 +3,8 @@ import { db } from "../lib/db";
 import type { Meal as MealRow, Session } from "../lib/types";
 import { Loading } from "../components/ui";
 
-// Stand-in for the vision model. The real build sends the photo to an API;
-// here we pick a plausible Indian-plate estimate so the flow is demonstrable.
+// Fallback when the vision model isn't connected — a plausible Indian-plate estimate
+// so the flow is always demonstrable.
 const SAMPLES = [
   { label: "Dal, rice, salad, 2 rotis", kcal: 620, protein_g: 24, carbs_g: 82, fat_g: 16 },
   { label: "Paneer bhurji, 2 rotis", kcal: 540, protein_g: 28, carbs_g: 40, fat_g: 28 },
@@ -13,11 +13,32 @@ const SAMPLES = [
   { label: "Egg bhurji, oats", kcal: 410, protein_g: 26, carbs_g: 34, fat_g: 18 },
 ];
 
+type Scan = { label: string; kcal: number; protein_g: number; carbs_g: number; fat_g: number };
+
+// Downscale a picked image to <=1024px JPEG so the upload stays small.
+function shrink(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 1024;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * scale);
+      c.height = Math.round(img.height * scale);
+      c.getContext("2d")!.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", 0.8));
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 export default function Meal({ session }: { session: Session }) {
   const mid = session.member_id!;
   const [meals, setMeals] = useState<MealRow[] | null>(null);
-  const [scan, setScan] = useState<(typeof SAMPLES)[number] | null>(null);
-  const [scanning, setScanning] = useState(false);
+  const [scan, setScan] = useState<Scan | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => db.listMeals(mid).then(setMeals);
@@ -26,19 +47,40 @@ export default function Meal({ session }: { session: Session }) {
   }, [mid]);
   if (!meals) return <Loading />;
 
-  function pickPhoto() {
-    setScanning(true);
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
     setScan(null);
-    setTimeout(() => {
+    setNote(null);
+    try {
+      const dataUrl = await shrink(file);
+      const est = await db.scanMeal(dataUrl);
+      if (est.configured && est.label && !est.error) {
+        setScan({
+          label: est.label,
+          kcal: est.kcal ?? 0,
+          protein_g: est.protein_g ?? 0,
+          carbs_g: est.carbs_g ?? 0,
+          fat_g: est.fat_g ?? 0,
+        });
+      } else {
+        setScan(SAMPLES[Math.floor(Math.random() * SAMPLES.length)]);
+        setNote("Sample estimate — connect the vision model in Supabase to read the real photo.");
+      }
+    } catch {
       setScan(SAMPLES[Math.floor(Math.random() * SAMPLES.length)]);
-      setScanning(false);
-    }, 900);
+      setNote("Couldn't read that image — showing a sample.");
+    }
+    setBusy(false);
   }
 
   async function logIt() {
     if (!scan) return;
     await db.logMeal(mid, scan);
     setScan(null);
+    setNote(null);
     await load();
   }
 
@@ -49,16 +91,15 @@ export default function Meal({ session }: { session: Session }) {
     <div className="flex flex-col gap-4 pt-1">
       <h1 className="text-xl font-extrabold">Meal scan</h1>
 
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
       <button
-        className="rounded-2xl h-44 grid place-items-center text-white text-sm font-bold bg-dark"
-        onClick={pickPhoto}
+        className="rounded-2xl h-44 grid place-items-center text-white text-sm font-bold bg-dark disabled:opacity-70"
+        disabled={busy}
+        onClick={() => fileRef.current?.click()}
       >
-        {scanning ? "Reading the plate…" : "📷  Take / choose a photo"}
+        {busy ? "Reading the plate…" : "📷  Take / choose a photo"}
       </button>
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" />
-      <p className="text-[11px] text-muted -mt-2">
-        Estimate only. In this test build the photo isn't uploaded — a sample result is shown.
-      </p>
+      {note && <p className="text-[11px] text-muted -mt-2">{note}</p>}
 
       {scan && (
         <div className="card p-4 flex flex-col gap-3">

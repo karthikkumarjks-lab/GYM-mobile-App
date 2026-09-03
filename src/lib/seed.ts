@@ -12,6 +12,7 @@ export const seedGym: Gym = {
   city: "Bengaluru",
   logo_url: null,
   accent: "#F5533D",
+  webhook_secret: "demo-webhook-secret",
 };
 
 const NAMES = [
