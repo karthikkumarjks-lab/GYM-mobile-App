@@ -10,9 +10,13 @@ export default function Members() {
   const [form, setForm] = useState({ full_name: "", phone: "", plan: "Monthly" });
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = () => db.membersWithSignals().then((r) => setRows(r.sort((a, b) => a.full_name.localeCompare(b.full_name))));
+  const load = () =>
+    db.membersWithSignals().then((r) =>
+      setRows(r.sort((a, b) => a.full_name.localeCompare(b.full_name)))
+    );
   useEffect(() => {
-    load();
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!rows) return <Loading />;
@@ -25,7 +29,7 @@ export default function Members() {
     await db.addMember(form);
     setForm({ full_name: "", phone: "", plan: "Monthly" });
     setAdding(false);
-    load();
+    await load();
   }
 
   async function check(id: string) {
