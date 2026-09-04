@@ -44,6 +44,25 @@ export default function Payments() {
     if (m?.plan && PLAN_FEE_FIELD[m.plan]) setPlan(m.plan);
   }
 
+  const MULT: Record<string, number> = { Quarterly: 3, "Half-yearly": 6, Annual: 12 };
+
+  function setFee(label: string, raw: string) {
+    const val = raw.replace(/[^\d]/g, "");
+    if (label === "Monthly") {
+      // typing the monthly fee fills the longer tiers at plain multiples;
+      // the owner can still tweak any tier afterwards
+      const m = Number(val) || 0;
+      setFees({
+        Monthly: val,
+        Quarterly: m ? String(m * 3) : "",
+        "Half-yearly": m ? String(m * 6) : "",
+        Annual: m ? String(m * 12) : "",
+      });
+    } else {
+      setFees({ ...fees, [label]: val });
+    }
+  }
+
   async function saveFees() {
     const patch: Partial<Gym> = {
       fee_monthly_paise: Math.round(Number(fees.Monthly) * 100),
@@ -84,17 +103,22 @@ export default function Payments() {
         <div className="eyebrow">
           Membership fees {feesSaved && <span className="text-pos"> · saved</span>}
         </div>
+        <p className="text-xs text-muted -mt-1">
+          Set the monthly fee and the others fill in at 3× / 6× / 12×. Adjust any tier to give a discount.
+        </p>
         <div className="grid grid-cols-2 gap-2.5">
           {PLAN_LABELS.map((p) => (
             <label key={p} className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">{p}</span>
+              <span className="text-xs font-semibold text-muted">
+                {p}{MULT[p] ? <span className="text-muted/60"> · {MULT[p]}×</span> : null}
+              </span>
               <div className="flex items-center gap-1 field !py-2">
                 <span className="text-muted text-sm">₹</span>
                 <input
                   className="w-full outline-none bg-transparent text-sm font-bold"
                   inputMode="numeric"
                   value={fees[p] ?? ""}
-                  onChange={(e) => setFees({ ...fees, [p]: e.target.value.replace(/[^\d]/g, "") })}
+                  onChange={(e) => setFee(p, e.target.value)}
                   onBlur={saveFees}
                 />
               </div>
