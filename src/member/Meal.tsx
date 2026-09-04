@@ -3,17 +3,8 @@ import { db } from "../lib/db";
 import type { Meal as MealRow, Session } from "../lib/types";
 import { Loading } from "../components/ui";
 
-// Fallback when the vision model isn't connected — a plausible Indian-plate estimate
-// so the flow is always demonstrable.
-const SAMPLES = [
-  { label: "Dal, rice, salad, 2 rotis", kcal: 620, protein_g: 24, carbs_g: 82, fat_g: 16 },
-  { label: "Paneer bhurji, 2 rotis", kcal: 540, protein_g: 28, carbs_g: 40, fat_g: 28 },
-  { label: "Chicken curry, rice", kcal: 700, protein_g: 38, carbs_g: 74, fat_g: 22 },
-  { label: "Curd rice, papad", kcal: 430, protein_g: 12, carbs_g: 66, fat_g: 12 },
-  { label: "Egg bhurji, oats", kcal: 410, protein_g: 26, carbs_g: 34, fat_g: 18 },
-];
-
-type Scan = { label: string; kcal: number; protein_g: number; carbs_g: number; fat_g: number };
+type Draft = { label: string; kcal: string; protein_g: string; carbs_g: string; fat_g: string };
+const emptyDraft: Draft = { label: "", kcal: "", protein_g: "", carbs_g: "", fat_g: "" };
 
 // Downscale a picked image to <=1024px JPEG so the upload stays small.
 function shrink(file: File): Promise<string> {
@@ -32,11 +23,13 @@ function shrink(file: File): Promise<string> {
     img.src = URL.createObjectURL(file);
   });
 }
+const num = (s: string) => Math.max(0, Math.round(Number(s) || 0));
 
 export default function Meal({ session }: { session: Session }) {
   const mid = session.member_id!;
   const [meals, setMeals] = useState<MealRow[] | null>(null);
-  const [scan, setScan] = useState<Scan | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [source, setSource] = useState<"ai" | "manual" | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -52,67 +45,116 @@ export default function Meal({ session }: { session: Session }) {
     e.target.value = "";
     if (!file) return;
     setBusy(true);
-    setScan(null);
     setNote(null);
     try {
-      const dataUrl = await shrink(file);
-      const est = await db.scanMeal(dataUrl);
+      const est = await db.scanMeal(await shrink(file));
       if (est.configured && est.label && !est.error) {
-        setScan({
+        setDraft({
           label: est.label,
-          kcal: est.kcal ?? 0,
-          protein_g: est.protein_g ?? 0,
-          carbs_g: est.carbs_g ?? 0,
-          fat_g: est.fat_g ?? 0,
+          kcal: String(est.kcal ?? ""),
+          protein_g: String(est.protein_g ?? ""),
+          carbs_g: String(est.carbs_g ?? ""),
+          fat_g: String(est.fat_g ?? ""),
         });
+        setSource("ai");
+        setNote("AI estimate — adjust the portion if it looks off, then log it.");
       } else {
-        setScan(SAMPLES[Math.floor(Math.random() * SAMPLES.length)]);
-        setNote("Sample estimate — connect the vision model in Supabase to read the real photo.");
+        setDraft(emptyDraft);
+        setSource("manual");
+        setNote(
+          est.error
+            ? "Couldn't read that photo. Type what you ate instead."
+            : "Photo reading isn't switched on for your gym yet — type what you ate below.",
+        );
       }
     } catch {
-      setScan(SAMPLES[Math.floor(Math.random() * SAMPLES.length)]);
-      setNote("Couldn't read that image — showing a sample.");
+      setDraft(emptyDraft);
+      setSource("manual");
+      setNote("Couldn't open that image. Type what you ate below.");
     }
     setBusy(false);
   }
 
+  function startManual() {
+    setDraft(emptyDraft);
+    setSource("manual");
+    setNote(null);
+  }
+
   async function logIt() {
-    if (!scan) return;
-    await db.logMeal(mid, scan);
-    setScan(null);
+    if (!draft || !draft.label.trim()) return;
+    await db.logMeal(mid, {
+      label: draft.label.trim(),
+      kcal: num(draft.kcal),
+      protein_g: num(draft.protein_g),
+      carbs_g: num(draft.carbs_g),
+      fat_g: num(draft.fat_g),
+    });
+    setDraft(null);
+    setSource(null);
     setNote(null);
     await load();
   }
 
   const today = meals.filter((m) => new Date(m.at).toDateString() === new Date().toDateString());
   const sum = (k: keyof MealRow) => today.reduce((n, m) => n + (Number(m[k]) || 0), 0);
+  const f = (k: keyof Draft, v: string) => setDraft((d) => (d ? { ...d, [k]: v } : d));
 
   return (
     <div className="flex flex-col gap-4 pt-1">
-      <h1 className="text-xl font-extrabold">Meal scan</h1>
+      <h1 className="text-xl font-extrabold">Meal log</h1>
 
       <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
-      <button
-        className="rounded-2xl h-44 grid place-items-center text-white text-sm font-bold bg-dark disabled:opacity-70"
-        disabled={busy}
-        onClick={() => fileRef.current?.click()}
-      >
-        {busy ? "Reading the plate…" : "📷  Take / choose a photo"}
-      </button>
-      {note && <p className="text-[11px] text-muted -mt-2">{note}</p>}
+      <div className="flex gap-2">
+        <button
+          className="flex-1 rounded-2xl h-32 grid place-items-center text-white text-sm font-bold bg-dark disabled:opacity-70"
+          disabled={busy}
+          onClick={() => fileRef.current?.click()}
+        >
+          {busy ? "Reading the plate…" : "📷  Photo"}
+        </button>
+        <button
+          className="flex-1 rounded-2xl h-32 grid place-items-center text-ink text-sm font-bold bg-card border border-line"
+          onClick={startManual}
+        >
+          ✍️  Type it
+        </button>
+      </div>
+      {note && <p className="text-xs text-muted -mt-1">{note}</p>}
 
-      {scan && (
+      {draft && (
         <div className="card p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="font-bold text-sm">{scan.label}</div>
-            <span className="pill bg-accent-soft text-accent">~{scan.kcal} kcal</span>
+          {source === "ai" && (
+            <span className="pill bg-accent-soft text-accent self-start">AI estimate · edit before logging</span>
+          )}
+          <input
+            className="field"
+            placeholder="What did you eat?"
+            value={draft.label}
+            onChange={(e) => f("label", e.target.value)}
+            autoFocus={source === "manual"}
+          />
+          <div className="grid grid-cols-4 gap-2">
+            <Field label="kcal" value={draft.kcal} onChange={(v) => f("kcal", v)} />
+            <Field label="protein" value={draft.protein_g} onChange={(v) => f("protein_g", v)} suffix="g" />
+            <Field label="carbs" value={draft.carbs_g} onChange={(v) => f("carbs_g", v)} suffix="g" />
+            <Field label="fat" value={draft.fat_g} onChange={(v) => f("fat_g", v)} suffix="g" />
           </div>
-          <Bar label="Protein" v={scan.protein_g} max={60} color="var(--accent)" />
-          <Bar label="Carbs" v={scan.carbs_g} max={120} color="#3B6FE0" />
-          <Bar label="Fat" v={scan.fat_g} max={50} color="#B7791F" />
-          <button className="btn" onClick={logIt}>
-            Add to today's log
-          </button>
+          <div className="flex gap-2">
+            <button className="btn flex-1" disabled={!draft.label.trim()} onClick={logIt}>
+              Add to today's log
+            </button>
+            <button
+              className="btn-ghost"
+              onClick={() => {
+                setDraft(null);
+                setSource(null);
+                setNote(null);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -141,15 +183,31 @@ export default function Meal({ session }: { session: Session }) {
   );
 }
 
-function Bar({ label, v, max, color }: { label: string; v: number; max: number; color: string }) {
+function Field({
+  label,
+  value,
+  onChange,
+  suffix,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  suffix?: string;
+}) {
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="text-xs font-bold w-14">{label}</span>
-      <span className="flex-1 h-2 rounded bg-paper overflow-hidden">
-        <i className="block h-full rounded" style={{ width: `${Math.min(100, (v / max) * 100)}%`, background: color }} />
-      </span>
-      <span className="text-xs font-extrabold w-10 text-right">{v} g</span>
-    </div>
+    <label className="flex flex-col gap-1">
+      <span className="text-[10px] text-muted font-semibold text-center">{label}</span>
+      <div className="field !px-2 !py-1.5 flex items-center justify-center gap-0.5">
+        <input
+          className="w-full bg-transparent outline-none text-sm font-bold text-center"
+          inputMode="numeric"
+          placeholder="—"
+          value={value}
+          onChange={(e) => onChange(e.target.value.replace(/[^\d]/g, ""))}
+        />
+        {suffix && value && <span className="text-[10px] text-muted">{suffix}</span>}
+      </div>
+    </label>
   );
 }
 function Tile({ v, k }: { v: React.ReactNode; k: string }) {
