@@ -1,35 +1,71 @@
 import { useEffect, useState } from "react";
 import { db } from "../lib/db";
-import type { Member, Payment } from "../lib/types";
+import { PLAN_FEE_FIELD, PLAN_LABELS, type Gym, type Member, type Payment } from "../lib/types";
 import { Avatar, Loading, Pill, timeAgo } from "../components/ui";
 
+const rupees = (paise: number) => "₹" + (paise / 100).toLocaleString("en-IN");
+const feeOf = (gym: Gym, plan: string) => Number(gym[PLAN_FEE_FIELD[plan] ?? "fee_monthly_paise"]) || 0;
+
 export default function Payments() {
+  const [gym, setGym] = useState<Gym | null>(null);
   const [rows, setRows] = useState<Payment[] | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [form, setForm] = useState({ member_id: "", amount: "1500", purpose: "Monthly fee" });
+  const [plan, setPlan] = useState<string>("Monthly");
+  const [memberId, setMemberId] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ url: string | null; configured: boolean } | null>(null);
 
+  // editable fee schedule
+  const [fees, setFees] = useState<Record<string, string>>({});
+  const [feesSaved, setFeesSaved] = useState(false);
+
   const load = () => db.listPayments().then(setRows);
   useEffect(() => {
+    db.getGym().then((g) => {
+      setGym(g);
+      setFees({
+        Monthly: String(g.fee_monthly_paise / 100),
+        Quarterly: String(g.fee_quarterly_paise / 100),
+        "Half-yearly": String(g.fee_half_paise / 100),
+        Annual: String(g.fee_annual_paise / 100),
+      });
+    });
     load();
     db.listMembers().then(setMembers);
   }, []);
 
-  if (!rows) return <Loading />;
+  if (!rows || !gym) return <Loading />;
   const nameOf = (id: string | null) => members.find((m) => m.id === id)?.full_name ?? "—";
+  const amount = feeOf(gym, plan);
+
+  function pickMember(id: string) {
+    setMemberId(id);
+    const m = members.find((x) => x.id === id);
+    if (m?.plan && PLAN_FEE_FIELD[m.plan]) setPlan(m.plan);
+  }
+
+  async function saveFees() {
+    const patch: Partial<Gym> = {
+      fee_monthly_paise: Math.round(Number(fees.Monthly) * 100),
+      fee_quarterly_paise: Math.round(Number(fees.Quarterly) * 100),
+      fee_half_paise: Math.round(Number(fees["Half-yearly"]) * 100),
+      fee_annual_paise: Math.round(Number(fees.Annual) * 100),
+    };
+    setGym(await db.updateGym(patch));
+    setFeesSaved(true);
+    setTimeout(() => setFeesSaved(false), 1500);
+  }
 
   async function collect(e: React.FormEvent) {
     e.preventDefault();
-    const paise = Math.round(Number(form.amount) * 100);
-    if (paise < 100) return;
+    if (amount < 100) return;
     setBusy(true);
     setResult(null);
     try {
       const r = await db.collectFee({
-        member_id: form.member_id || null,
-        amount_paise: paise,
-        purpose: form.purpose,
+        member_id: memberId || null,
+        amount_paise: amount,
+        purpose: `${plan} fee`,
       });
       setResult({ url: r.payment.link_url, configured: r.configured });
       await load();
@@ -40,38 +76,61 @@ export default function Payments() {
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 max-w-lg">
       <h2 className="text-xl font-extrabold">Payments</h2>
 
+      {/* fee schedule */}
+      <div className="card p-4 flex flex-col gap-3">
+        <div className="eyebrow">
+          Membership fees {feesSaved && <span className="text-pos"> · saved</span>}
+        </div>
+        <div className="grid grid-cols-2 gap-2.5">
+          {PLAN_LABELS.map((p) => (
+            <label key={p} className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted">{p}</span>
+              <div className="flex items-center gap-1 field !py-2">
+                <span className="text-muted text-sm">₹</span>
+                <input
+                  className="w-full outline-none bg-transparent text-sm font-bold"
+                  inputMode="numeric"
+                  value={fees[p] ?? ""}
+                  onChange={(e) => setFees({ ...fees, [p]: e.target.value.replace(/[^\d]/g, "") })}
+                  onBlur={saveFees}
+                />
+              </div>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {/* collect a fee */}
       <form onSubmit={collect} className="card p-4 flex flex-col gap-3">
         <div className="eyebrow">Collect a fee</div>
-        <select
-          className="field"
-          value={form.member_id}
-          onChange={(e) => setForm({ ...form, member_id: e.target.value })}
-        >
+        <select className="field" value={memberId} onChange={(e) => pickMember(e.target.value)}>
           <option value="">— member (optional) —</option>
           {members.map((m) => (
             <option key={m.id} value={m.id}>{m.full_name}</option>
           ))}
         </select>
-        <div className="flex gap-3">
-          <input
-            className="field"
-            inputMode="numeric"
-            value={form.amount}
-            onChange={(e) => setForm({ ...form, amount: e.target.value.replace(/[^\d]/g, "") })}
-            placeholder="Amount ₹"
-          />
-          <input
-            className="field"
-            value={form.purpose}
-            onChange={(e) => setForm({ ...form, purpose: e.target.value })}
-            placeholder="Purpose"
-          />
+        <div className="flex gap-2">
+          {PLAN_LABELS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPlan(p)}
+              className={`flex-1 rounded-xl py-2 text-xs font-bold border ${
+                plan === p ? "bg-accent text-white border-accent" : "bg-card text-muted border-line"
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+        <div className="text-sm text-muted">
+          {plan} fee · <span className="font-extrabold text-ink">{rupees(amount)}</span>
         </div>
         <button className="btn" disabled={busy}>
-          {busy ? "Creating…" : "Create payment link"}
+          {busy ? "Creating…" : `Create payment link · ${rupees(amount)}`}
         </button>
         {result && (
           <div className="text-sm">
@@ -103,7 +162,7 @@ export default function Payments() {
                   {p.purpose} · {timeAgo(p.created_at)}
                 </div>
               </div>
-              <div className="text-sm font-extrabold">₹{(p.amount_paise / 100).toLocaleString("en-IN")}</div>
+              <div className="text-sm font-extrabold">{rupees(p.amount_paise)}</div>
               <Pill tone={p.status === "paid" ? "pos" : p.status === "simulated" ? "mut" : "acc"}>{p.status}</Pill>
             </div>
           ))}

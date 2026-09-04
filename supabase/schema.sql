@@ -226,7 +226,27 @@ create policy "gym-assets write"  on storage.objects for insert to authenticated
 create policy "gym-assets update" on storage.objects for update to authenticated using (bucket_id = 'gym-assets');
 create policy "gym-assets delete" on storage.objects for delete to authenticated using (bucket_id = 'gym-assets');
 
+-- ---------- membership fees + expanded roles (added later) ----------
+alter table gyms
+  add column if not exists fee_monthly_paise   int not null default 180000,
+  add column if not exists fee_quarterly_paise  int not null default 480000,
+  add column if not exists fee_half_paise        int not null default 850000,
+  add column if not exists fee_annual_paise      int not null default 1500000;
+
+alter table profiles drop constraint if exists profiles_role_check;
+alter table profiles add constraint profiles_role_check
+  check (role in ('owner','co-owner','admin','staff','member'));
+
+-- staff-level check (owner + co-owner + admin + staff); replaces auth_role() in (...)
+create or replace function auth_is_staff() returns boolean
+language sql stable security definer set search_path = public as $$
+  select coalesce(
+    (select role from profiles where id = auth.uid()) in ('owner','co-owner','admin','staff'),
+    false)
+$$;
+grant execute on function auth_is_staff() to authenticated;
+-- every "auth_role() in ('owner','staff')" write policy above is swapped to auth_is_staff().
+
 -- Edge functions: supabase/functions/{device-checkin, meal-scan, whatsapp-send,
---   razorpay-link, create-member}. Secrets they need are in supabase/SETUP.md.
--- create-member is owner-only and adds a member's roster row + auth login together;
--- members cannot self-register.
+--   razorpay-link, create-member, remove-member}. Secrets in supabase/SETUP.md.
+-- create-member / remove-member are owner/admin-only. Members cannot self-register.

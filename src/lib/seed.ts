@@ -13,6 +13,10 @@ export const seedGym: Gym = {
   logo_url: null,
   accent: "#F5533D",
   webhook_secret: "demo-webhook-secret",
+  fee_monthly_paise: 180000,
+  fee_quarterly_paise: 480000,
+  fee_half_paise: 850000,
+  fee_annual_paise: 1500000,
 };
 
 const NAMES = [

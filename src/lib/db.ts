@@ -9,7 +9,7 @@ import { buildSeed, seedGym } from "./seed";
 import { hasSupabase, supabase } from "./supabase";
 import type {
   Checkin, Gym, Meal, Member, MemberWithSignal, Message, Order, OrderItem,
-  Payment, Plan, Product, Session,
+  Payment, Plan, Product, Session, TeamMember,
 } from "./types";
 
 export interface MealEstimate {
@@ -30,6 +30,7 @@ export interface MemberInput {
   full_name: string;
   email: string;
   password: string;
+  role?: string;
   phone?: string;
   plan?: string;
 }
@@ -192,15 +193,35 @@ const mockDb = {
     await wait();
     return rd<Member[]>(K.members, []);
   },
-  async addMember(input: MemberInput): Promise<Member> {
+  async addMember(input: MemberInput): Promise<void> {
     const g = rd<Gym>(K.gym, seedGym);
-    const m: Member = {
-      id: uid(), gym_id: g.id, full_name: input.full_name.trim(),
-      phone: input.phone?.trim() || null, plan: input.plan || "Monthly",
-      joined_on: new Date().toISOString().slice(0, 10), status: "active",
-    };
-    wr(K.members, [...rd<Member[]>(K.members, []), m]);
-    return m;
+    const role = input.role || "member";
+    if (role === "member") {
+      const m: Member = {
+        id: uid(), gym_id: g.id, full_name: input.full_name.trim(),
+        phone: input.phone?.trim() || null, plan: input.plan || "Monthly",
+        joined_on: new Date().toISOString().slice(0, 10), status: "active",
+      };
+      wr(K.members, [...rd<Member[]>(K.members, []), m]);
+    } else {
+      const t = rd<TeamMember[]>("mg.team", []);
+      wr("mg.team", [...t, { id: uid(), full_name: input.full_name.trim(), role: role as TeamMember["role"] }]);
+    }
+  },
+  async removeMember(ref: { member_id?: string; profile_id?: string }): Promise<void> {
+    if (ref.member_id) {
+      wr(K.members, rd<Member[]>(K.members, []).filter((m) => m.id !== ref.member_id));
+      wr(K.checkins, rd<Checkin[]>(K.checkins, []).filter((c) => c.member_id !== ref.member_id));
+    }
+    if (ref.profile_id) {
+      wr("mg.team", rd<TeamMember[]>("mg.team", []).filter((t) => t.id !== ref.profile_id));
+    }
+  },
+  async listTeam(): Promise<TeamMember[]> {
+    return [
+      { id: "owner", full_name: "Gym owner", role: "owner" },
+      ...rd<TeamMember[]>("mg.team", []),
+    ];
   },
   async membersWithSignals(): Promise<MemberWithSignal[]> {
     await wait();
@@ -408,15 +429,25 @@ const supaDb = {
     if (error) throw error;
     return data as Member[];
   },
-  async addMember(input: MemberInput): Promise<Member> {
-    // Owner-only edge function: creates the roster row + the member's login together.
+  async addMember(input: MemberInput): Promise<void> {
+    // Owner-only edge function: creates the roster row (for members) + the login together.
     const { data, error } = await supabase.functions.invoke("create-member", { body: input });
-    if (error) {
-      const msg = (data as { error?: string })?.error;
-      throw new Error(msg || error.message);
-    }
-    if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
-    return (data as { member: Member }).member;
+    const errMsg = (data as { error?: string })?.error;
+    if (error || errMsg) throw new Error(errMsg || error?.message || "Could not add");
+  },
+  async removeMember(ref: { member_id?: string; profile_id?: string }): Promise<void> {
+    const { data, error } = await supabase.functions.invoke("remove-member", { body: ref });
+    const errMsg = (data as { error?: string })?.error;
+    if (error || errMsg) throw new Error(errMsg || error?.message || "Could not remove");
+  },
+  async listTeam(): Promise<TeamMember[]> {
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, full_name, role")
+      .eq("gym_id", requireGymId())
+      .neq("role", "member")
+      .order("role");
+    return (data ?? []) as TeamMember[];
   },
   async membersWithSignals(): Promise<MemberWithSignal[]> {
     const gid = requireGymId();

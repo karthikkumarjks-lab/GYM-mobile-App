@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { db } from "./lib/db";
-import type { Session } from "./lib/types";
+import { isStaff, type Session } from "./lib/types";
 
 import OwnerShell from "./owner/OwnerShell";
 import Dashboard from "./owner/Dashboard";
@@ -40,7 +40,7 @@ export default function App() {
 
         <Route
           path="/owner"
-          element={session?.role === "owner" ? <OwnerShell onSignOut={() => setSession(null)} /> : <Navigate to="/login" />}
+          element={isStaff(session?.role) ? <OwnerShell onSignOut={() => setSession(null)} /> : <Navigate to="/login" />}
         >
           <Route index element={<Dashboard />} />
           <Route path="members" element={<Members />} />
@@ -62,7 +62,7 @@ export default function App() {
 
         <Route
           path="*"
-          element={<Navigate to={session ? (session.role === "owner" ? "/owner" : "/m") : "/login"} />}
+          element={<Navigate to={session ? (isStaff(session.role) ? "/owner" : "/m") : "/login"} />}
         />
       </Routes>
     </BrowserRouter>
@@ -82,7 +82,7 @@ function Login() {
     setErr(null);
     try {
       const s = await db.signIn(email, password);
-      location.assign(s.role === "owner" ? "/owner" : "/m");
+      location.assign(isStaff(s.role) ? "/owner" : "/m");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Sign-in failed");
       setBusy(false);
