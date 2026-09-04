@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { db } from "../lib/db";
 import { functionsUrl } from "../lib/supabase";
 import type { Gym } from "../lib/types";
@@ -9,6 +9,8 @@ const COLOURS = ["#F5533D", "#2F7DE1", "#15A24A", "#7A3FF2", "#E0A800", "#111111
 export default function Branding() {
   const [gym, setGym] = useState<Gym | null>(null);
   const [saved, setSaved] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const logoRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     db.getGym().then(setGym);
@@ -20,6 +22,20 @@ export default function Branding() {
     setGym(g);
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  }
+
+  async function onLogo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await db.uploadAsset(file);
+      await patch({ logo_url: url });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Upload failed");
+    }
+    setUploading(false);
   }
 
   return (
@@ -68,15 +84,31 @@ export default function Branding() {
         </div>
       </div>
 
-      <div className="card p-4 flex items-center gap-3">
+      <div className="card p-4 flex items-center gap-4">
         <div
-          className="h-16 w-16 rounded-2xl grid place-items-center text-white text-xl font-black flex-none"
+          className="h-16 w-16 rounded-2xl grid place-items-center text-white text-xl font-black flex-none overflow-hidden"
           style={{ background: gym.accent }}
         >
-          {gym.name.slice(0, 2).toUpperCase()}
+          {gym.logo_url ? (
+            <img src={gym.logo_url} alt="logo" className="h-full w-full object-cover" />
+          ) : (
+            gym.name.slice(0, 2).toUpperCase()
+          )}
         </div>
-        <div className="text-sm text-muted">
-          Logo upload comes with file storage. For now the initials + your colour stand in.
+        <div className="flex flex-col gap-2 flex-1">
+          <div className="eyebrow">Logo</div>
+          <input ref={logoRef} type="file" accept="image/*" className="hidden" onChange={onLogo} />
+          <div className="flex gap-2">
+            <button className="btn-ghost py-2 px-3 text-xs" disabled={uploading} onClick={() => logoRef.current?.click()}>
+              {uploading ? "Uploading…" : gym.logo_url ? "Replace logo" : "Upload logo"}
+            </button>
+            {gym.logo_url && (
+              <button className="btn-ghost py-2 px-3 text-xs" onClick={() => patch({ logo_url: null })}>
+                Remove
+              </button>
+            )}
+          </div>
+          <div className="text-[11px] text-muted">Square PNG or JPG works best. Shown to members across the app.</div>
         </div>
       </div>
 

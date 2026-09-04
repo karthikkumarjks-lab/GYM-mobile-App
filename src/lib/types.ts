@@ -10,6 +10,37 @@ export interface Gym {
   webhook_secret?: string;
 }
 
+export interface Product {
+  id: string;
+  gym_id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  price_paise: number;
+  stock: number;
+  image_url: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+export interface OrderItem {
+  product_id: string;
+  name: string;
+  price_paise: number;
+  qty: number;
+}
+
+export interface Order {
+  id: string;
+  gym_id: string;
+  member_id: string;
+  items: OrderItem[];
+  total_paise: number;
+  status: "pending" | "paid" | "collected" | "cancelled";
+  payment_id: string | null;
+  created_at: string;
+}
+
 export interface Payment {
   id: string;
   gym_id: string;

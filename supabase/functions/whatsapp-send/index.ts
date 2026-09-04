@@ -1,20 +1,19 @@
-// Send a WhatsApp message via the WhatsApp Cloud API (Meta).
-// Needs secrets: WHATSAPP_TOKEN, WHATSAPP_PHONE_ID.
-// Without them, returns {configured:false} and the caller keeps its simulated outbox.
-// Deployed with verify_jwt = true.
-//
-// body: { to: "+9198...", body?: string, template?: string, lang?: string, params?: string[] }
-//  - template given  -> template message (works anytime; needs Meta approval, except
-//                       the built-in "hello_world" which every account has)
-//  - body only       -> free-form text (only delivers within 24h of the user messaging you)
+// Send a WhatsApp message via the WhatsApp Cloud API. Needs WHATSAPP_TOKEN + WHATSAPP_PHONE_ID.
+// Without them: {configured:false}. verify_jwt = true.
+// body: { to, body?, template?, lang?, params? }
 
 const TOKEN = Deno.env.get("WHATSAPP_TOKEN");
 const PHONE_ID = Deno.env.get("WHATSAPP_PHONE_ID");
-
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "authorization, x-client-info, apikey, content-type",
+  "access-control-allow-methods": "POST, OPTIONS",
+};
 const json = (b: unknown, status = 200) =>
-  new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
+  new Response(JSON.stringify(b), { status, headers: { ...CORS, "content-type": "application/json" } });
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   if (!TOKEN || !PHONE_ID) return json({ configured: false });
 
@@ -24,7 +23,6 @@ Deno.serve(async (req) => {
   } catch {
     return json({ error: "bad body" }, 400);
   }
-
   const to = String(p.to ?? "").replace(/[^\d]/g, "");
   if (!to) return json({ error: "missing 'to'" }, 400);
 

@@ -1,4 +1,4 @@
-import type { Gym, Member, Checkin, Message, Plan, Meal } from "./types";
+import type { Gym, Member, Checkin, Message, Plan, Meal, Product } from "./types";
 
 const uid = () =>
   (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now());
@@ -82,5 +82,18 @@ export function buildSeed() {
 
   const messages: Message[] = [];
   const meals: Meal[] = [];
-  return { gym: seedGym, members, checkins, plans, messages, meals };
+  const products: Product[] = [
+    ["Whey Protein 1 kg", "24g protein per scoop, chocolate", "Supplements", 249000, 18],
+    ["Creatine Monohydrate 250 g", "Micronised, unflavoured", "Supplements", 89900, 25],
+    ["Pre-workout 300 g", "Fruit punch", "Supplements", 159900, 6],
+    ["Iron House training tee", "Dri-fit, black", "Apparel", 79900, 30],
+    ["Steel shaker bottle", "700 ml", "Accessories", 49900, 40],
+    ["Lifting straps", "Cotton, pair", "Accessories", 39900, 12],
+  ].map(([name, description, category, price_paise, stock]) => ({
+    id: uid(), gym_id: GYM_ID, name: name as string, description: description as string,
+    category: category as string, price_paise: price_paise as number, stock: stock as number,
+    image_url: null, active: true, created_at: new Date().toISOString(),
+  }));
+
+  return { gym: seedGym, members, checkins, plans, messages, meals, products };
 }

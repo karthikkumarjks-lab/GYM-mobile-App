@@ -8,7 +8,8 @@
 import { buildSeed, seedGym } from "./seed";
 import { hasSupabase, supabase } from "./supabase";
 import type {
-  Checkin, Gym, Meal, Member, MemberWithSignal, Message, Payment, Plan, Session,
+  Checkin, Gym, Meal, Member, MemberWithSignal, Message, Order, OrderItem,
+  Payment, Plan, Product, Session,
 } from "./types";
 
 export interface MealEstimate {
@@ -24,6 +25,13 @@ export interface FeeInput {
   member_id?: string | null;
   amount_paise: number;
   purpose?: string;
+}
+export interface MemberInput {
+  full_name: string;
+  email: string;
+  password: string;
+  phone?: string;
+  plan?: string;
 }
 
 // ---------- shared pure logic ----------
@@ -137,6 +145,7 @@ function ensureSeed() {
   wr(K.plans, s.plans);
   wr(K.messages, s.messages);
   wr(K.meals, s.meals);
+  wr("mg.products", s.products);
 }
 
 const mockDb = {
@@ -183,7 +192,7 @@ const mockDb = {
     await wait();
     return rd<Member[]>(K.members, []);
   },
-  async addMember(input: { full_name: string; phone?: string; plan?: string }): Promise<Member> {
+  async addMember(input: MemberInput): Promise<Member> {
     const g = rd<Gym>(K.gym, seedGym);
     const m: Member = {
       id: uid(), gym_id: g.id, full_name: input.full_name.trim(),
@@ -274,6 +283,65 @@ const mockDb = {
     wr("mg.payments", [...rd<Payment[]>("mg.payments", []), row]);
     return { configured: false, payment: row };
   },
+
+  async uploadAsset(file: File): Promise<string> {
+    return await new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result));
+      r.readAsDataURL(file);
+    });
+  },
+  async listProducts(includeInactive = false): Promise<Product[]> {
+    ensureSeed();
+    let ps = rd<Product[]>("mg.products", []);
+    if (!includeInactive) ps = ps.filter((p) => p.active);
+    return ps.sort((a, b) => a.name.localeCompare(b.name));
+  },
+  async saveProduct(input: Partial<Product> & { name: string; price_paise: number }): Promise<Product> {
+    const g = rd<Gym>(K.gym, seedGym);
+    const all = rd<Product[]>("mg.products", []);
+    if (input.id) {
+      const next = all.map((p) => (p.id === input.id ? { ...p, ...input } as Product : p));
+      wr("mg.products", next);
+      return next.find((p) => p.id === input.id)!;
+    }
+    const row: Product = {
+      id: uid(), gym_id: g.id, name: input.name, description: input.description ?? null,
+      category: input.category ?? "Supplements", price_paise: input.price_paise,
+      stock: input.stock ?? 0, image_url: input.image_url ?? null, active: input.active ?? true,
+      created_at: new Date().toISOString(),
+    };
+    wr("mg.products", [...all, row]);
+    return row;
+  },
+  async deleteProduct(id: string): Promise<void> {
+    wr("mg.products", rd<Product[]>("mg.products", []).filter((p) => p.id !== id));
+  },
+  async listOrders(): Promise<Order[]> {
+    const s = getSession();
+    let os = rd<Order[]>("mg.orders", []);
+    if (s?.role === "member") os = os.filter((o) => o.member_id === s.member_id);
+    return os.sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
+  },
+  async placeOrder(items: OrderItem[]): Promise<Order> {
+    const s = getSession();
+    const g = rd<Gym>(K.gym, seedGym);
+    const total = items.reduce((n, i) => n + i.price_paise * i.qty, 0);
+    const row: Order = {
+      id: uid(), gym_id: g.id, member_id: s!.member_id!, items, total_paise: total,
+      status: "pending", payment_id: null, created_at: new Date().toISOString(),
+    };
+    wr("mg.orders", [...rd<Order[]>("mg.orders", []), row]);
+    const ps = rd<Product[]>("mg.products", []);
+    wr("mg.products", ps.map((p) => {
+      const it = items.find((i) => i.product_id === p.id);
+      return it ? { ...p, stock: Math.max(0, p.stock - it.qty) } : p;
+    }));
+    return row;
+  },
+  async setOrderStatus(id: string, status: Order["status"]): Promise<void> {
+    wr("mg.orders", rd<Order[]>("mg.orders", []).map((o) => (o.id === id ? { ...o, status } : o)));
+  },
 };
 
 /* ========================================================= SUPABASE ======== */
@@ -340,14 +408,15 @@ const supaDb = {
     if (error) throw error;
     return data as Member[];
   },
-  async addMember(input: { full_name: string; phone?: string; plan?: string }): Promise<Member> {
-    const { data, error } = await supabase
-      .from("members")
-      .insert({ gym_id: requireGymId(), full_name: input.full_name.trim(), phone: input.phone?.trim() || null, plan: input.plan || "Monthly" })
-      .select()
-      .single();
-    if (error) throw error;
-    return data as Member;
+  async addMember(input: MemberInput): Promise<Member> {
+    // Owner-only edge function: creates the roster row + the member's login together.
+    const { data, error } = await supabase.functions.invoke("create-member", { body: input });
+    if (error) {
+      const msg = (data as { error?: string })?.error;
+      throw new Error(msg || error.message);
+    }
+    if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
+    return (data as { member: Member }).member;
   },
   async membersWithSignals(): Promise<MemberWithSignal[]> {
     const gid = requireGymId();
@@ -458,6 +527,92 @@ const supaDb = {
     const { data, error } = await supabase.functions.invoke("razorpay-link", { body: input });
     if (error) throw error;
     return data as { configured: boolean; payment: Payment };
+  },
+
+  async uploadAsset(file: File): Promise<string> {
+    const ext = (file.name.split(".").pop() || "png").toLowerCase();
+    const path = `${requireGymId()}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from("gym-assets").upload(path, file, {
+      upsert: true,
+      contentType: file.type || undefined,
+    });
+    if (error) throw error;
+    return supabase.storage.from("gym-assets").getPublicUrl(path).data.publicUrl;
+  },
+  async listProducts(includeInactive = false): Promise<Product[]> {
+    let q = supabase.from("products").select("*").eq("gym_id", requireGymId()).order("name");
+    if (!includeInactive) q = q.eq("active", true);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data as Product[];
+  },
+  async saveProduct(input: Partial<Product> & { name: string; price_paise: number }): Promise<Product> {
+    if (input.id) {
+      const { id, gym_id: _g, created_at: _c, ...patch } = input;
+      const { data, error } = await supabase.from("products").update(patch).eq("id", id).select().single();
+      if (error) throw error;
+      return data as Product;
+    }
+    const { data, error } = await supabase
+      .from("products")
+      .insert({
+        gym_id: requireGymId(),
+        name: input.name,
+        description: input.description ?? null,
+        category: input.category ?? "Supplements",
+        price_paise: input.price_paise,
+        stock: input.stock ?? 0,
+        image_url: input.image_url ?? null,
+        active: input.active ?? true,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return data as Product;
+  },
+  async deleteProduct(id: string): Promise<void> {
+    const { error } = await supabase.from("products").delete().eq("id", id);
+    if (error) throw error;
+  },
+  async listOrders(): Promise<Order[]> {
+    const { data, error } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("gym_id", requireGymId())
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return data as Order[];
+  },
+  async placeOrder(items: OrderItem[]): Promise<Order> {
+    const s = getSession();
+    const total = items.reduce((n, i) => n + i.price_paise * i.qty, 0);
+    const { data, error } = await supabase
+      .from("orders")
+      .insert({ gym_id: requireGymId(), member_id: s!.member_id, items, total_paise: total })
+      .select()
+      .single();
+    if (error) throw error;
+    // Best-effort stock decrement (a member can update products? no — RLS blocks it).
+    // Stock is corrected by the owner; for the test build we just record the order.
+    return data as Order;
+  },
+  async setOrderStatus(id: string, status: Order["status"]): Promise<void> {
+    const { data: o, error } = await supabase
+      .from("orders")
+      .update({ status })
+      .eq("id", id)
+      .select("items, status")
+      .single();
+    if (error) throw error;
+    // Owner marking an order collected -> draw down stock (owner has product write access).
+    if (status === "collected") {
+      for (const it of ((o?.items ?? []) as OrderItem[])) {
+        const { data: p } = await supabase.from("products").select("stock").eq("id", it.product_id).single();
+        if (p) {
+          await supabase.from("products").update({ stock: Math.max(0, p.stock - it.qty) }).eq("id", it.product_id);
+        }
+      }
+    }
   },
 };
 

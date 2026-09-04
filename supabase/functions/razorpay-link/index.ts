@@ -1,30 +1,31 @@
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 // Create a Razorpay payment link for a member's fee and record it.
-// Needs secrets: RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET (test-mode keys are fine).
-// Without them, returns {configured:false} and records a simulated link.
-// Deployed with verify_jwt = true.
-//
-// body: { member_id?: uuid, amount_paise: number, purpose?: string }
-// The payments row is inserted as the calling user, so RLS keeps it gym-scoped.
+// Needs RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET (test-mode fine). Without them: simulated.
+// verify_jwt = true. body: { member_id?, amount_paise, purpose? }
 
+const URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const KEY_ID = Deno.env.get("RAZORPAY_KEY_ID");
 const KEY_SECRET = Deno.env.get("RAZORPAY_KEY_SECRET");
-
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "authorization, x-client-info, apikey, content-type",
+  "access-control-allow-methods": "POST, OPTIONS",
+};
 const json = (b: unknown, status = 200) =>
-  new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
+  new Response(JSON.stringify(b), { status, headers: { ...CORS, "content-type": "application/json" } });
+const admin = createClient(URL, SERVICE);
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
-  const authz = req.headers.get("Authorization") ?? "";
-  const supa = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_ANON_KEY")!,
-    { global: { headers: { Authorization: authz } } },
-  );
-  const { data: prof } = await supa.from("profiles").select("gym_id, role").maybeSingle();
-  if (!prof?.gym_id) return json({ error: "not signed in" }, 401);
+  const jwt = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
+  const { data: auth } = await admin.auth.getUser(jwt);
+  if (!auth.user) return json({ error: "not signed in" }, 401);
+  const { data: prof } = await admin.from("profiles").select("gym_id, role").eq("id", auth.user.id).maybeSingle();
+  if (!prof?.gym_id || !(["owner", "staff"].includes(prof.role))) return json({ error: "owner only" }, 403);
 
   let p: Record<string, unknown> = {};
   try {
@@ -44,10 +45,7 @@ Deno.serve(async (req) => {
   if (KEY_ID && KEY_SECRET) {
     const r = await fetch("https://api.razorpay.com/v1/payment_links", {
       method: "POST",
-      headers: {
-        authorization: "Basic " + btoa(`${KEY_ID}:${KEY_SECRET}`),
-        "content-type": "application/json",
-      },
+      headers: { authorization: "Basic " + btoa(`${KEY_ID}:${KEY_SECRET}`), "content-type": "application/json" },
       body: JSON.stringify({ amount, currency: "INR", description: purpose, reminder_enable: true }),
     });
     const out = await r.json();
@@ -57,17 +55,11 @@ Deno.serve(async (req) => {
     status = "created";
   }
 
-  const { data: row, error } = await supa
+  const { data: row, error } = await admin
     .from("payments")
     .insert({
-      gym_id: prof.gym_id,
-      member_id: memberId,
-      amount_paise: amount,
-      purpose,
-      provider: "razorpay",
-      provider_ref: providerRef,
-      status,
-      link_url: linkUrl,
+      gym_id: prof.gym_id, member_id: memberId, amount_paise: amount, purpose,
+      provider: "razorpay", provider_ref: providerRef, status, link_url: linkUrl,
     })
     .select()
     .single();

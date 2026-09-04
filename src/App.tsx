@@ -8,12 +8,14 @@ import Dashboard from "./owner/Dashboard";
 import Members from "./owner/Members";
 import WinBack from "./owner/WinBack";
 import Payments from "./owner/Payments";
+import Store from "./owner/Store";
 import Branding from "./owner/Branding";
 
 import MemberShell from "./member/MemberShell";
 import Home from "./member/Home";
 import CheckIn from "./member/CheckIn";
 import Meal from "./member/Meal";
+import Shop from "./member/Shop";
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(db.getSession());
@@ -43,6 +45,7 @@ export default function App() {
           <Route index element={<Dashboard />} />
           <Route path="members" element={<Members />} />
           <Route path="winback" element={<WinBack />} />
+          <Route path="store" element={<Store />} />
           <Route path="payments" element={<Payments />} />
           <Route path="branding" element={<Branding />} />
         </Route>
@@ -54,6 +57,7 @@ export default function App() {
           <Route index element={<Home session={session!} />} />
           <Route path="checkin" element={<CheckIn session={session!} />} />
           <Route path="meal" element={<Meal session={session!} />} />
+          <Route path="shop" element={<Shop />} />
         </Route>
 
         <Route
@@ -89,11 +93,11 @@ function Login() {
     <div className="min-h-full grid place-items-center p-6">
       <form onSubmit={submit} className="w-full max-w-sm flex flex-col gap-4">
         <div>
-          <div className="h-14 w-14 rounded-2xl bg-accent grid place-items-center text-white text-2xl font-black">
-            IH
+          <div className="h-14 w-14 rounded-2xl bg-accent grid place-items-center text-white text-2xl font-black overflow-hidden">
+            <img src="/icon.svg" alt="" className="h-full w-full object-cover" />
           </div>
           <h1 className="text-2xl font-extrabold mt-4">Iron House Gym</h1>
-          <p className="text-sm text-muted mt-1">Sign in with your email — members and staff use the same screen.</p>
+          <p className="text-sm text-muted mt-1">Sign in with the email your gym set up for you.</p>
         </div>
 
         {err && <div className="card p-3 text-sm text-accent font-semibold">{err}</div>}
@@ -126,26 +130,9 @@ function Login() {
           {busy ? "Signing in…" : "Sign in"}
         </button>
 
-        <div className="card p-3 text-xs text-muted leading-relaxed">
-          <b className="text-ink">Test accounts</b> — password <code>ironhouse</code> for all
-          <br />
-          Owner: <code>owner@ironhouse.test</code>
-          <br />
-          Members: <code>arjun@ironhouse.test</code>, sana@, rohit@, divya@, karan@, priya@, mohit@, tara@
-        </div>
-
-        {db.backend === "mock" && (
-          <button
-            type="button"
-            className="text-xs text-muted underline"
-            onClick={() => {
-              db.resetDemo();
-              location.reload();
-            }}
-          >
-            Reset demo data
-          </button>
-        )}
+        <p className="text-xs text-muted">
+          Don't have an account? Ask your gym to add you.
+        </p>
       </form>
     </div>
   );

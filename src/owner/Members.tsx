@@ -7,8 +7,10 @@ export default function Members() {
   const [rows, setRows] = useState<MemberWithSignal[] | null>(null);
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ full_name: "", phone: "", plan: "Monthly" });
+  const [form, setForm] = useState({ full_name: "", email: "", password: "", phone: "", plan: "Monthly" });
   const [busy, setBusy] = useState<string | null>(null);
+  const [addErr, setAddErr] = useState<string | null>(null);
+  const [addBusy, setAddBusy] = useState(false);
 
   const load = () =>
     db.membersWithSignals().then((r) =>
@@ -25,11 +27,21 @@ export default function Members() {
 
   async function addMember(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.full_name.trim()) return;
-    await db.addMember(form);
-    setForm({ full_name: "", phone: "", plan: "Monthly" });
-    setAdding(false);
-    await load();
+    if (!form.full_name.trim() || !form.email.trim() || form.password.length < 6) {
+      setAddErr("Full name, email, and a password of at least 6 characters are required.");
+      return;
+    }
+    setAddBusy(true);
+    setAddErr(null);
+    try {
+      await db.addMember(form);
+      setForm({ full_name: "", email: "", password: "", phone: "", plan: "Monthly" });
+      setAdding(false);
+      await load();
+    } catch (e) {
+      setAddErr(e instanceof Error ? e.message : "Could not add member");
+    }
+    setAddBusy(false);
   }
 
   async function check(id: string) {
@@ -53,12 +65,29 @@ export default function Members() {
 
       {adding && (
         <form onSubmit={addMember} className="card p-4 flex flex-col gap-3">
+          <p className="text-xs text-muted">
+            This creates the member's login too. Give them the email and password you set here.
+          </p>
+          {addErr && <div className="text-sm text-accent font-semibold">{addErr}</div>}
           <input
             className="field"
             placeholder="Full name"
             value={form.full_name}
             onChange={(e) => setForm({ ...form, full_name: e.target.value })}
             autoFocus
+          />
+          <input
+            className="field"
+            type="email"
+            placeholder="Login email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+          />
+          <input
+            className="field"
+            placeholder="Temporary password (6+ chars)"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
           <div className="flex gap-3">
             <input
@@ -73,7 +102,9 @@ export default function Members() {
               ))}
             </select>
           </div>
-          <button className="btn">Add to Iron House Gym</button>
+          <button className="btn" disabled={addBusy}>
+            {addBusy ? "Creating…" : "Add member + create login"}
+          </button>
         </form>
       )}
 

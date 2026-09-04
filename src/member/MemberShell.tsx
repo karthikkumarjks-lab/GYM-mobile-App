@@ -7,6 +7,7 @@ const tabs = [
   { to: "/m", label: "Home", end: true },
   { to: "/m/checkin", label: "Check in" },
   { to: "/m/meal", label: "Meal" },
+  { to: "/m/shop", label: "Shop" },
 ];
 
 export default function MemberShell({ onSignOut }: { onSignOut: () => void }) {
@@ -25,10 +26,14 @@ export default function MemberShell({ onSignOut }: { onSignOut: () => void }) {
     >
       <header className="flex items-center gap-3 px-5 pt-4 pb-3">
         <div
-          className="h-8 w-8 rounded-lg grid place-items-center text-white text-xs font-black"
+          className="h-8 w-8 rounded-lg grid place-items-center text-white text-xs font-black overflow-hidden"
           style={{ background: accent }}
         >
-          {(gym?.name ?? "IH").slice(0, 2).toUpperCase()}
+          {gym?.logo_url ? (
+            <img src={gym.logo_url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            (gym?.name ?? "IH").slice(0, 2).toUpperCase()
+          )}
         </div>
         <div className="leading-tight">
           <div className="text-[11px] text-muted font-semibold">member</div>

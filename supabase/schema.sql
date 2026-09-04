@@ -175,5 +175,58 @@ create policy pay_write on payments for all
   using (gym_id = auth_gym_id() and auth_role() in ('owner','staff'))
   with check (gym_id = auth_gym_id() and auth_role() in ('owner','staff'));
 
--- Edge functions: supabase/functions/{device-checkin, meal-scan, whatsapp-send, razorpay-link}
--- Secrets they need are in supabase/SETUP.md.
+-- ---------- store: products + orders ----------
+create table if not exists products (
+  id          uuid primary key default gen_random_uuid(),
+  gym_id      uuid not null references gyms(id) on delete cascade,
+  name        text not null,
+  description text,
+  category    text default 'Supplements',
+  price_paise int not null check (price_paise >= 0),
+  stock       int not null default 0,
+  image_url   text,
+  active      boolean not null default true,
+  created_at  timestamptz default now()
+);
+create index if not exists products_gym on products (gym_id, active);
+alter table products enable row level security;
+create policy prod_read  on products for select using (gym_id = auth_gym_id());
+create policy prod_write on products for all
+  using (gym_id = auth_gym_id() and auth_role() in ('owner','staff'))
+  with check (gym_id = auth_gym_id() and auth_role() in ('owner','staff'));
+
+create table if not exists orders (
+  id          uuid primary key default gen_random_uuid(),
+  gym_id      uuid not null references gyms(id) on delete cascade,
+  member_id   uuid not null references members(id) on delete cascade,
+  items       jsonb not null default '[]',   -- [{product_id,name,price_paise,qty}]
+  total_paise int not null,
+  status      text not null default 'pending' check (status in ('pending','paid','collected','cancelled')),
+  payment_id  uuid references payments(id) on delete set null,
+  created_at  timestamptz default now()
+);
+create index if not exists orders_gym on orders (gym_id, created_at desc);
+create index if not exists orders_member on orders (member_id, created_at desc);
+alter table orders enable row level security;
+create policy ord_read on orders for select using (
+  gym_id = auth_gym_id() and (auth_role() in ('owner','staff') or member_id = auth_member_id())
+);
+create policy ord_insert on orders for insert with check (
+  gym_id = auth_gym_id() and member_id = auth_member_id()
+);
+create policy ord_update on orders for update using (
+  gym_id = auth_gym_id() and (auth_role() in ('owner','staff') or member_id = auth_member_id())
+);
+
+-- ---------- storage: gym logos + product images ----------
+insert into storage.buckets (id, name, public) values ('gym-assets', 'gym-assets', true)
+  on conflict (id) do nothing;
+create policy "gym-assets read"   on storage.objects for select using (bucket_id = 'gym-assets');
+create policy "gym-assets write"  on storage.objects for insert to authenticated with check (bucket_id = 'gym-assets');
+create policy "gym-assets update" on storage.objects for update to authenticated using (bucket_id = 'gym-assets');
+create policy "gym-assets delete" on storage.objects for delete to authenticated using (bucket_id = 'gym-assets');
+
+-- Edge functions: supabase/functions/{device-checkin, meal-scan, whatsapp-send,
+--   razorpay-link, create-member}. Secrets they need are in supabase/SETUP.md.
+-- create-member is owner-only and adds a member's roster row + auth login together;
+-- members cannot self-register.

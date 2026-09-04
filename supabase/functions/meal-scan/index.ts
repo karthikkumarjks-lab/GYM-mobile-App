@@ -1,24 +1,24 @@
 import Anthropic from "npm:@anthropic-ai/sdk";
 
-// Meal photo -> macro estimate via Claude vision.
-// Needs the ANTHROPIC_API_KEY secret. Without it, returns {configured:false} and the
-// frontend falls back to a sample estimate so the demo never breaks.
-// Deployed with verify_jwt = true (members call it signed in).
-//
-// Model note: uses claude-opus-5. For cheaper/faster meal photos, change `model` to
-// "claude-haiku-4-5" (~5x cheaper, still has vision).
+// Meal photo -> macro estimate via Claude vision. Needs ANTHROPIC_API_KEY.
+// Without it: {configured:false} and the frontend shows a sample. verify_jwt = true.
+// Model: claude-opus-5 (swap to claude-haiku-4-5 for ~5x lower cost per photo).
 
 const KEY = Deno.env.get("ANTHROPIC_API_KEY");
-
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-headers": "authorization, x-client-info, apikey, content-type",
+  "access-control-allow-methods": "POST, OPTIONS",
+};
 const json = (b: unknown, status = 200) =>
-  new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
-
+  new Response(JSON.stringify(b), { status, headers: { ...CORS, "content-type": "application/json" } });
 const clampInt = (v: unknown, max: number) => {
   const n = Math.round(Number(v));
   return Number.isFinite(n) ? Math.max(0, Math.min(max, n)) : 0;
 };
 
 Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
   if (!KEY) return json({ configured: false });
 
@@ -39,7 +39,6 @@ Deno.serve(async (req) => {
   }
 
   const anthropic = new Anthropic({ apiKey: KEY });
-
   try {
     const res = await anthropic.messages.create({
       model: "claude-opus-5",
@@ -60,10 +59,8 @@ Deno.serve(async (req) => {
         },
       ],
     });
-
     const text = res.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("").trim();
     const parsed = JSON.parse(text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim());
-
     return json({
       configured: true,
       label: String(parsed.label ?? "Meal").slice(0, 80),
