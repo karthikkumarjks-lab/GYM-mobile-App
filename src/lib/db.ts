@@ -147,16 +147,17 @@ const mockDb = {
   onAuthChange(_cb: (s: Session | null) => void) {
     return () => {};
   },
-  async demoLogin(who: string) {
+  async signIn(email: string, _password: string): Promise<Session> {
     ensureSeed();
     const g = rd<Gym>(K.gym, seedGym);
-    if (who === "owner") {
+    const local = email.trim().toLowerCase().split("@")[0];
+    if (local === "owner") {
       setSession({ role: "owner", gym_id: g.id, full_name: "Gym owner" });
-    } else {
-      const m = rd<Member[]>(K.members, []).find((x) => x.full_name.split(" ")[0].toLowerCase() === who.toLowerCase());
-      if (!m) throw new Error("Unknown demo member");
-      setSession({ role: "member", gym_id: g.id, member_id: m.id, full_name: m.full_name });
+      return getSession()!;
     }
+    const m = rd<Member[]>(K.members, []).find((x) => x.full_name.split(" ")[0].toLowerCase() === local);
+    if (!m) throw new Error("No account for that email. Try owner@ironhouse.test");
+    setSession({ role: "member", gym_id: g.id, member_id: m.id, full_name: m.full_name });
     return getSession()!;
   },
   async signOut() {
@@ -276,10 +277,6 @@ const mockDb = {
 };
 
 /* ========================================================= SUPABASE ======== */
-const DEMO_PASSWORD = "ironhouse";
-const demoEmail = (who: string) =>
-  who === "owner" ? "owner@ironhouse.test" : `${who.toLowerCase()}@ironhouse.test`;
-
 async function profileToSession(): Promise<Session | null> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return null;
@@ -314,14 +311,11 @@ const supaDb = {
     });
     return () => data.subscription.unsubscribe();
   },
-  async demoLogin(who: string): Promise<Session> {
-    const { error } = await supabase.auth.signInWithPassword({
-      email: demoEmail(who),
-      password: DEMO_PASSWORD,
-    });
-    if (error) throw error;
+  async signIn(email: string, password: string): Promise<Session> {
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    if (error) throw new Error(/invalid/i.test(error.message) ? "Wrong email or password." : error.message);
     const s = await profileToSession();
-    if (!s) throw new Error("No profile for this account");
+    if (!s) throw new Error("This account isn't linked to a gym yet.");
     return s;
   },
   async signOut() {

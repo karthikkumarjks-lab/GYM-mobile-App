@@ -15,8 +15,6 @@ import Home from "./member/Home";
 import CheckIn from "./member/CheckIn";
 import Meal from "./member/Meal";
 
-const DEMO_MEMBERS = ["Arjun", "Sana", "Rohit", "Divya", "Karan", "Priya", "Mohit", "Tara"];
-
 export default function App() {
   const [session, setSession] = useState<Session | null>(db.getSession());
   const [ready, setReady] = useState(false);
@@ -68,59 +66,77 @@ export default function App() {
 }
 
 function Login() {
-  const [busy, setBusy] = useState<string | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function go(who: string, dest: string) {
-    setBusy(who);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+    setBusy(true);
     setErr(null);
     try {
-      await db.demoLogin(who);
-      location.assign(dest);
+      const s = await db.signIn(email, password);
+      location.assign(s.role === "owner" ? "/owner" : "/m");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Sign-in failed");
-      setBusy(null);
+      setBusy(false);
     }
   }
 
   return (
     <div className="min-h-full grid place-items-center p-6">
-      <div className="w-full max-w-sm flex flex-col gap-5">
+      <form onSubmit={submit} className="w-full max-w-sm flex flex-col gap-4">
         <div>
           <div className="h-14 w-14 rounded-2xl bg-accent grid place-items-center text-white text-2xl font-black">
             IH
           </div>
           <h1 className="text-2xl font-extrabold mt-4">Iron House Gym</h1>
-          <p className="text-sm text-muted mt-1">
-            Test build — pick who to sign in as, no password needed.
-            {db.backend === "mock" && " Data is stored in this browser only."}
-          </p>
+          <p className="text-sm text-muted mt-1">Sign in with your email — members and staff use the same screen.</p>
         </div>
 
         {err && <div className="card p-3 text-sm text-accent font-semibold">{err}</div>}
 
-        <button className="btn" disabled={!!busy} onClick={() => go("owner", "/owner")}>
-          {busy === "owner" ? "…" : "Sign in as the gym owner"}
+        <label className="flex flex-col gap-1">
+          <span className="eyebrow">Email</span>
+          <input
+            className="field"
+            type="email"
+            autoComplete="username"
+            inputMode="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="eyebrow">Password</span>
+          <input
+            className="field"
+            type="password"
+            autoComplete="current-password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+
+        <button className="btn" disabled={busy}>
+          {busy ? "Signing in…" : "Sign in"}
         </button>
 
-        <div>
-          <div className="eyebrow mb-2">…or as a member</div>
-          <div className="card divide-y divide-line">
-            {DEMO_MEMBERS.map((first) => (
-              <button
-                key={first}
-                disabled={!!busy}
-                className="w-full text-left px-4 py-3 text-sm font-semibold hover:bg-paper disabled:opacity-50"
-                onClick={() => go(first, "/m")}
-              >
-                {busy === first ? "…" : first}
-              </button>
-            ))}
-          </div>
+        <div className="card p-3 text-xs text-muted leading-relaxed">
+          <b className="text-ink">Test accounts</b> — password <code>ironhouse</code> for all
+          <br />
+          Owner: <code>owner@ironhouse.test</code>
+          <br />
+          Members: <code>arjun@ironhouse.test</code>, sana@, rohit@, divya@, karan@, priya@, mohit@, tara@
         </div>
 
         {db.backend === "mock" && (
           <button
+            type="button"
             className="text-xs text-muted underline"
             onClick={() => {
               db.resetDemo();
@@ -130,7 +146,7 @@ function Login() {
             Reset demo data
           </button>
         )}
-      </div>
+      </form>
     </div>
   );
 }
