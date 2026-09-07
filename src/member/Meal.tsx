@@ -35,11 +35,25 @@ export default function Meal({ session }: { session: Session }) {
   const [busy, setBusy] = useState(false);
   const [looking, setLooking] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const lastLookup = useRef("");
+  const timer = useRef<number | undefined>(undefined);
 
   const load = () => db.listMeals(mid).then(setMeals);
   useEffect(() => {
     load();
   }, [mid]);
+
+  // auto-lookup ~600ms after the member stops typing, while macros are still blank
+  useEffect(() => {
+    if (!draft || source === "ai" || draft.kcal) return;
+    const name = draft.label.trim();
+    if (name.length < 3 || name === lastLookup.current) return;
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => void lookup(name), 600);
+    return () => window.clearTimeout(timer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft?.label, draft?.kcal, source]);
+
   if (!meals) return <Loading />;
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -80,44 +94,56 @@ export default function Meal({ session }: { session: Session }) {
   function startTyping() {
     setDraft(emptyDraft);
     setSource("manual");
-    setNote("Type the dish name and tap “Get nutrition”.");
+    setNote("Type the dish name — the nutrition fills in automatically.");
   }
 
-  async function lookup() {
-    const name = draft?.label.trim();
-    if (!name || name.length < 2) return;
+  async function lookup(rawName: string): Promise<Draft | null> {
+    const name = rawName.trim();
+    if (name.length < 3) return null;
+    lastLookup.current = name;
     setLooking(true);
+    let filled: Draft | null = null;
     try {
       const est = await db.lookupDish(name);
       if (est.configured && (est.kcal ?? 0) > 0) {
-        setDraft({
-          label: est.label || name,
+        filled = {
+          label: name, // keep exactly what the member typed
           kcal: String(est.kcal ?? ""),
           protein_g: String(est.protein_g ?? ""),
           carbs_g: String(est.carbs_g ?? ""),
           fat_g: String(est.fat_g ?? ""),
-        });
+        };
+        setDraft(filled);
         setSource("list");
-        setNote("Estimate for one serving — adjust the numbers if your portion was bigger or smaller.");
+        setNote(`Matched “${est.label}” · one serving — adjust the numbers for your portion.`);
       } else {
         setSource("manual");
-        setNote("Not in our food list — enter the values yourself, or try a photo.");
+        setNote("Not in our food list — type the calories and macros yourself, or use a photo.");
       }
     } catch {
       setSource("manual");
       setNote("Couldn't look that up — enter the values yourself.");
     }
     setLooking(false);
+    return filled;
   }
+
 
   async function logIt() {
     if (!draft || !draft.label.trim()) return;
+    let final = draft;
+    // last-chance lookup if the member logs before the auto-fetch resolved
+    if (num(final.kcal) === 0) {
+      const found = await lookup(final.label);
+      if (found) final = found;
+      else if (!confirm("No nutrition found for this — log it with 0 calories anyway?")) return;
+    }
     await db.logMeal(mid, {
-      label: draft.label.trim(),
-      kcal: num(draft.kcal),
-      protein_g: num(draft.protein_g),
-      carbs_g: num(draft.carbs_g),
-      fat_g: num(draft.fat_g),
+      label: final.label.trim(),
+      kcal: num(final.kcal),
+      protein_g: num(final.protein_g),
+      carbs_g: num(final.carbs_g),
+      fat_g: num(final.fat_g),
     });
     setDraft(null);
     setSource(null);
@@ -162,21 +188,26 @@ export default function Meal({ session }: { session: Session }) {
           <div className="flex gap-2">
             <input
               className="field flex-1"
-              placeholder="e.g. masala dosa, 2 rotis + dal"
+              placeholder="e.g. chicken biryani, masala dosa, 2 rotis + dal"
               value={draft.label}
               onChange={(e) => f("label", e.target.value)}
               onBlur={() => {
-                if (source !== "ai" && !draft.kcal) void lookup();
+                if (source !== "ai" && !draft.kcal) void lookup(draft.label);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
-                  void lookup();
+                  void lookup(draft.label);
                 }
               }}
               autoFocus={source === "manual"}
             />
-            <button type="button" className="btn-ghost whitespace-nowrap" disabled={looking} onClick={lookup}>
+            <button
+              type="button"
+              className="btn-ghost whitespace-nowrap"
+              disabled={looking}
+              onClick={() => lookup(draft.label)}
+            >
               {looking ? "…" : "Get nutrition"}
             </button>
           </div>

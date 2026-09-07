@@ -93,11 +93,11 @@ const TABLE: Row[] = [
   ["Jeera rice (1 cup)", 250, 4, 45, 6],
   ["Ghee rice (1 cup)", 300, 4, 45, 12],
   ["Veg pulao (plate)", 350, 8, 55, 11, "pulao", "pilaf"],
-  ["Veg biryani (plate)", 450, 10, 68, 15, "vegetable biryani"],
-  ["Chicken biryani (plate)", 600, 28, 70, 22, "murgh biryani"],
-  ["Mutton biryani (plate)", 700, 30, 72, 32],
-  ["Egg biryani (plate)", 520, 18, 68, 18],
-  ["Hyderabadi biryani (plate)", 650, 27, 72, 26],
+  ["Veg biryani (plate)", 450, 10, 68, 15, "vegetable biryani", "veg biriyani", "veg briyani"],
+  ["Chicken biryani (plate)", 600, 28, 70, 22, "murgh biryani", "chicken biriyani", "chicken briyani", "chiken biryani"],
+  ["Mutton biryani (plate)", 700, 30, 72, 32, "mutton biriyani", "mutton briyani", "lamb biryani"],
+  ["Egg biryani (plate)", 520, 18, 68, 18, "egg biriyani", "anda biryani"],
+  ["Hyderabadi biryani (plate)", 650, 27, 72, 26, "hyderabadi biriyani"],
   ["Curd / raita (bowl)", 90, 4, 8, 4, "raita", "curd", "dahi"],
 
   // --- Snacks & street food ---
@@ -174,46 +174,81 @@ const FOODS: Food[] = TABLE.map(([label, kcal, protein_g, carbs_g, fat_g, ...ali
   label, kcal, protein_g, carbs_g, fat_g, aliases,
 }));
 
-const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-const STOP = new Set(["with", "and", "the", "a", "of", "plate", "bowl", "serving", "pc", "pcs", "piece"]);
-const tokens = (s: string) => norm(s).split(" ").filter((t) => t && !STOP.has(t));
+const norm = (s: string) =>
+  s.toLowerCase().replace(/[().,/+&-]/g, " ").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+
+// words to ignore: fillers, portion/quantity words, and bare quantities like "500g", "2", "1kg"
+const STOP = new Set([
+  "with", "and", "the", "a", "an", "of", "in", "plate", "bowl", "serving", "servings",
+  "pc", "pcs", "piece", "pieces", "half", "full", "large", "small", "medium", "regular",
+  "cup", "cups", "glass", "spoon", "gm", "gms", "grams", "gram", "some", "one", "two",
+]);
+const isQty = (t: string) => /^\d+$/.test(t) || /^\d+(g|kg|ml|l|gm|gms|oz|pc|pcs)$/.test(t);
+const tokens = (s: string) => norm(s).split(" ").filter((t) => t && !STOP.has(t) && !isQty(t));
+
+// small Levenshtein for fuzzy token matching (biriyani ~ biryani, panner ~ paneer)
+function lev(a: string, b: string): number {
+  const m = a.length, n = b.length;
+  if (Math.abs(m - n) > 2) return 3;
+  const d = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    let prev = d[0];
+    d[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = d[j];
+      d[j] = Math.min(
+        d[j] + 1,
+        d[j - 1] + 1,
+        prev + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+      prev = tmp;
+    }
+  }
+  return d[n];
+}
+function tokenMatch(t: string, n: string): boolean {
+  if (t === n || n.startsWith(t) || t.startsWith(n)) return true;
+  if (t.length >= 4 && n.length >= 4 && lev(t, n) <= (Math.max(t.length, n.length) >= 7 ? 2 : 1)) return true;
+  return false;
+}
 
 /** Best-match a free-text dish name to the built-in table. */
 export function lookupFood(query: string): FoodMacros | null {
   const q = norm(query);
   if (q.length < 2) return null;
+  const out = (f: Food): FoodMacros => ({
+    label: f.label, kcal: f.kcal, protein_g: f.protein_g, carbs_g: f.carbs_g, fat_g: f.fat_g,
+  });
 
   // 1. exact label or alias
   for (const f of FOODS) {
-    if (norm(f.label) === q || f.aliases.some((a) => norm(a) === q)) {
-      return { label: f.label, kcal: f.kcal, protein_g: f.protein_g, carbs_g: f.carbs_g, fat_g: f.fat_g };
-    }
+    if (norm(f.label) === q || f.aliases.some((a) => norm(a) === q)) return out(f);
   }
 
-  // 2. token-overlap score
   const qt = tokens(query);
   if (!qt.length) return null;
+  const qset = new Set(qt);
+
   let best: Food | null = null;
   let bestScore = 0;
   for (const f of FOODS) {
-    const names = [f.label, ...f.aliases];
-    let score = 0;
-    for (const name of names) {
+    for (const name of [f.label, ...f.aliases]) {
       const nt = tokens(name);
-      const overlap = qt.filter((t) => nt.some((n) => n === t || n.startsWith(t) || t.startsWith(n))).length;
-      if (!overlap) continue;
-      // reward matching a bigger share of the candidate's own words
-      score = Math.max(score, overlap + overlap / nt.length);
-    }
-    if (score > bestScore) {
-      bestScore = score;
-      best = f;
+      if (!nt.length) continue;
+      const matched = nt.filter((n) => qt.some((t) => tokenMatch(t, n))).length;
+      if (!matched) continue;
+      // fraction of the candidate's words we hit + fraction of the query's words used
+      const coverage = matched / nt.length;
+      const usage = nt.filter((n) => qset.has(n)).length / qt.length;
+      const score = matched + coverage + usage * 0.5;
+      if (score > bestScore) {
+        bestScore = score;
+        best = f;
+      }
     }
   }
-  if (best && bestScore >= 1) {
-    return { label: best.label, kcal: best.kcal, protein_g: best.protein_g, carbs_g: best.carbs_g, fat_g: best.fat_g };
-  }
-  return null;
+  // need at least one solid word match
+  return best && bestScore >= 1.3 ? out(best) : null;
 }
 
 export const FOOD_COUNT = FOODS.length;
