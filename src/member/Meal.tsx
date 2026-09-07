@@ -42,6 +42,7 @@ export default function Meal({ session }: { session: Session }) {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [photo, setPhoto] = useState<string | null>(null); // data URL, shown + uploaded on log
   const [source, setSource] = useState<Source | null>(null);
+  const [origin, setOrigin] = useState<"ai" | "list" | "estimate" | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [looking, setLooking] = useState(false);
@@ -88,11 +89,13 @@ export default function Meal({ session }: { session: Session }) {
           fat_g: String(est.fat_g ?? ""),
         });
         setSource("ai");
+        setOrigin("ai");
         lastLookup.current = est.label;
         setNote("Read from your photo — fix the dish name if it's wrong, or adjust the portion, then log it.");
       } else {
         setDraft(emptyDraft);
         setSource("manual");
+        setOrigin(null);
         setNote(
           est.error
             ? "Couldn't read that photo. Type the dish name below and we'll look up the nutrition."
@@ -111,6 +114,7 @@ export default function Meal({ session }: { session: Session }) {
     setPhoto(null);
     setDraft(emptyDraft);
     setSource("manual");
+    setOrigin(null);
     setNote("Type the dish name — the nutrition fills in automatically.");
   }
 
@@ -132,13 +136,16 @@ export default function Meal({ session }: { session: Session }) {
         };
         setDraft(filled);
         setSource("list");
+        setOrigin(est.source === "ai" ? "ai" : est.source === "estimate" ? "estimate" : "list");
         setNote(`Matched “${est.label}” · one serving — adjust the numbers for your portion.`);
       } else {
         setSource("manual");
+        setOrigin(null);
         setNote("Not in our food list — type the calories and macros yourself.");
       }
     } catch {
       setSource("manual");
+      setOrigin(null);
       setNote("Couldn't look that up — enter the values yourself.");
     }
     setLooking(false);
@@ -149,6 +156,7 @@ export default function Meal({ session }: { session: Session }) {
     setDraft(null);
     setPhoto(null);
     setSource(null);
+    setOrigin(null);
     setNote(null);
   }
 
@@ -313,6 +321,9 @@ export default function Meal({ session }: { session: Session }) {
             <Field label="carbs" value={draft.carbs_g} onChange={(v) => f("carbs_g", v)} suffix="g" />
             <Field label="fat" value={draft.fat_g} onChange={(v) => f("fat_g", v)} suffix="g" />
           </div>
+
+          {origin && <SourceLine origin={origin} />}
+
           <div className="flex gap-2">
             <button className="btn flex-1" disabled={busy || !draft.label.trim()} onClick={logIt}>
               {busy ? "Saving…" : "Add to today's log"}
@@ -379,6 +390,23 @@ function Field({
         {suffix && value && <span className="text-[10px] text-muted">{suffix}</span>}
       </div>
     </label>
+  );
+}
+function SourceLine({ origin }: { origin: "ai" | "list" | "estimate" }) {
+  const text =
+    origin === "ai"
+      ? "Source: read from your photo by AI (Claude vision). Always sense-check the portion."
+      : origin === "list"
+        ? "Source: Momentum food list — standard per-serving values compiled from public nutrition data (IFCT 2017 · ICMR–NIN and USDA FoodData Central). Adjust for your portion."
+        : "Rough estimate from the dish type — not a database match. Please correct the numbers before logging.";
+  return (
+    <p
+      className={`text-[10px] leading-snug rounded-lg px-2 py-1.5 ${
+        origin === "estimate" ? "bg-accent-soft text-accent" : "bg-paper text-muted"
+      }`}
+    >
+      {text}
+    </p>
   );
 }
 function Tile({ v, k }: { v: React.ReactNode; k: string }) {

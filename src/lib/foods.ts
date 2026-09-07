@@ -1,6 +1,11 @@
-// Built-in nutrition table for common Indian dishes — per one typical restaurant/home
-// serving. Used so "type a dish name" always returns an estimate with no API key.
-// Values are rounded approximations; the member can adjust before logging.
+// Built-in nutrition table — one typical restaurant/home serving per row. Lets "type a
+// dish name" work with no API key. Values are standard per-serving figures compiled from
+// public nutrition data (IFCT 2017 / ICMR–NIN for Indian foods, USDA FoodData Central for
+// the rest), rounded; the member adjusts for their portion before logging. Rows carry
+// source "list"; the keyword fallback (estimateFood) carries source "estimate" so the UI
+// can tell the member which one they're looking at.
+// TODO: replace the hand-maintained rows with a generated file built directly from the
+// IFCT 2017 CSV + USDA FDC export so every value is traceable to a row id.
 
 export interface FoodMacros {
   label: string;
@@ -8,6 +13,8 @@ export interface FoodMacros {
   protein_g: number;
   carbs_g: number;
   fat_g: number;
+  /** where the numbers came from — shown to the member so they know how much to trust it */
+  source?: "list" | "estimate";
 }
 
 type Row = [name: string, kcal: number, p: number, c: number, f: number, ...aliases: string[]];
@@ -659,6 +666,7 @@ export function lookupFood(query: string): FoodMacros | null {
   if (q.length < 2) return null;
   const out = (f: Food): FoodMacros => ({
     label: f.label, kcal: f.kcal, protein_g: f.protein_g, carbs_g: f.carbs_g, fat_g: f.fat_g,
+    source: "list",
   });
 
   // 1. exact label or alias
@@ -750,7 +758,7 @@ function estimateFood(query: string, qt: string[]): FoodMacros | null {
   const title = query.trim().replace(/\s+/g, " ");
   return {
     label: `${title.charAt(0).toUpperCase()}${title.slice(1)} (estimate)`,
-    kcal, protein_g, carbs_g, fat_g,
+    kcal, protein_g, carbs_g, fat_g, source: "estimate",
   };
 }
 
@@ -784,6 +792,7 @@ export function lookupMeal(query: string): FoodMacros | null {
         protein_g: Math.round(sum("protein_g")),
         carbs_g: Math.round(sum("carbs_g")),
         fat_g: Math.round(sum("fat_g")),
+        source: anyEst ? "estimate" : "list",
       };
     }
   }

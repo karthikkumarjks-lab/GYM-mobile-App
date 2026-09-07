@@ -21,6 +21,8 @@ export interface MealEstimate {
   carbs_g?: number;
   fat_g?: number;
   error?: string;
+  /** provenance of the numbers, shown to the member */
+  source?: "ai" | "list" | "estimate";
 }
 export interface FeeInput {
   member_id?: string | null;
@@ -586,14 +588,14 @@ const supaDb = {
   async scanMeal(image: string): Promise<MealEstimate> {
     const { data, error } = await supabase.functions.invoke("meal-scan", { body: { image } });
     if (error || !data) return { configured: false, error: error?.message };
-    return data as MealEstimate;
+    return { source: "ai", ...(data as MealEstimate) };
   },
   async lookupDish(name: string): Promise<MealEstimate> {
     // Prefer an AI estimate when the model is connected; always fall back to the local table.
     try {
       const { data } = await supabase.functions.invoke("meal-scan", { body: { text: name } });
       const est = data as MealEstimate | null;
-      if (est?.configured && est.label && !est.error) return est;
+      if (est?.configured && est.label && !est.error) return { source: "ai", ...est };
     } catch { /* fall through to local */ }
     const hit = lookupMeal(name);
     return hit ? { configured: true, ...hit } : { configured: false, label: name.trim() };
