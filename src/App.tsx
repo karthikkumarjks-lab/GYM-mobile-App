@@ -6,6 +6,7 @@ import { isStaff, type Session } from "./lib/types";
 import OwnerShell from "./owner/OwnerShell";
 import Dashboard from "./owner/Dashboard";
 import Members from "./owner/Members";
+import MemberDetail from "./owner/MemberDetail";
 import WinBack from "./owner/WinBack";
 import Payments from "./owner/Payments";
 import Store from "./owner/Store";
@@ -44,6 +45,7 @@ export default function App() {
         >
           <Route index element={<Dashboard />} />
           <Route path="members" element={<Members />} />
+          <Route path="members/:id" element={<MemberDetail />} />
           <Route path="winback" element={<WinBack />} />
           <Route path="store" element={<Store />} />
           <Route path="payments" element={<Payments />} />

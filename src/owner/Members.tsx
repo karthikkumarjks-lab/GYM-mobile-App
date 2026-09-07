@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { db } from "../lib/db";
 import { ADDABLE_ROLES, ROLE_LABEL, type MemberWithSignal, type TeamMember } from "../lib/types";
 import { Avatar, Loading, Pill, timeAgo } from "../components/ui";
@@ -141,11 +142,13 @@ export default function Members() {
       <div className="card divide-y divide-line">
         {filtered.map((m) => (
           <div key={m.id} className="px-4 py-3 flex items-center gap-2.5">
-            <Avatar name={m.full_name} tone={m.risk === "at_risk" ? "warn" : "acc"} />
-            <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold truncate">{m.full_name}</div>
-              <div className="text-xs text-muted">{m.plan} · last in {timeAgo(m.last_visit)}</div>
-            </div>
+            <Link to={`/owner/members/${m.id}`} className="flex items-center gap-2.5 flex-1 min-w-0">
+              <Avatar name={m.full_name} tone={m.risk === "at_risk" ? "warn" : "acc"} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-bold truncate">{m.full_name}</div>
+                <div className="text-xs text-muted">{m.plan} · last in {timeAgo(m.last_visit)}</div>
+              </div>
+            </Link>
             {riskPill(m.risk)}
             <button className="btn py-2 px-3 text-xs" disabled={busy === m.id} onClick={() => check(m.id)}>
               {busy === m.id ? "…" : "Check in"}

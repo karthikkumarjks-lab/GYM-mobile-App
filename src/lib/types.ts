@@ -139,6 +139,24 @@ export interface Meal {
   protein_g?: number | null;
   carbs_g?: number | null;
   fat_g?: number | null;
+  photo_url?: string | null;
+}
+
+export interface DietMealSlot {
+  slot: string;
+  items: string;
+}
+export interface DietPlan {
+  member_id: string;
+  gym_id: string;
+  daily_kcal: number | null;
+  protein_g: number | null;
+  carbs_g: number | null;
+  fat_g: number | null;
+  notes: string | null;
+  meals: DietMealSlot[];
+  assigned_by: string | null;
+  updated_at: string;
 }
 
 export interface Session {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { db } from "../lib/db";
-import type { Meal as MealRow, Session } from "../lib/types";
+import type { DietPlan, Meal as MealRow, Session } from "../lib/types";
 import { Loading } from "../components/ui";
 
 type Draft = { label: string; kcal: string; protein_g: string; carbs_g: string; fat_g: string };
@@ -24,23 +24,36 @@ function shrink(file: File): Promise<string> {
     img.src = URL.createObjectURL(file);
   });
 }
+function dataUrlToFile(dataUrl: string): File {
+  const [head, b64] = dataUrl.split(",");
+  const mime = head.match(/:(.*?);/)?.[1] ?? "image/jpeg";
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new File([arr], `meal-${Date.now()}.jpg`, { type: mime });
+}
 const num = (s: string) => Math.max(0, Math.round(Number(s) || 0));
 
 export default function Meal({ session }: { session: Session }) {
   const mid = session.member_id!;
   const [meals, setMeals] = useState<MealRow[] | null>(null);
+  const [plan, setPlan] = useState<DietPlan | null>(null);
+  const [planOpen, setPlanOpen] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [photo, setPhoto] = useState<string | null>(null); // data URL, shown + uploaded on log
   const [source, setSource] = useState<Source | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [looking, setLooking] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
+  const camRef = useRef<HTMLInputElement>(null);
+  const galRef = useRef<HTMLInputElement>(null);
   const lastLookup = useRef("");
   const timer = useRef<number | undefined>(undefined);
 
   const load = () => db.listMeals(mid).then(setMeals);
   useEffect(() => {
     load();
+    db.getDietPlan(mid).then(setPlan);
   }, [mid]);
 
   // auto-lookup ~600ms after the member stops typing, while macros are still blank
@@ -63,7 +76,9 @@ export default function Meal({ session }: { session: Session }) {
     setBusy(true);
     setNote(null);
     try {
-      const est = await db.scanMeal(await shrink(file));
+      const dataUrl = await shrink(file);
+      setPhoto(dataUrl);
+      const est = await db.scanMeal(dataUrl);
       if (est.configured && est.label && !est.error) {
         setDraft({
           label: est.label,
@@ -73,25 +88,26 @@ export default function Meal({ session }: { session: Session }) {
           fat_g: String(est.fat_g ?? ""),
         });
         setSource("ai");
-        setNote("AI estimate — adjust the portion if it looks off, then log it.");
+        setNote("Read from your photo — adjust the portion if it looks off, then log it.");
       } else {
         setDraft(emptyDraft);
         setSource("manual");
         setNote(
           est.error
-            ? "Couldn't read that photo. Type what you ate instead."
-            : "Photo reading isn't switched on for your gym yet — type what you ate below.",
+            ? "Couldn't read that photo. Type the dish name below and we'll look up the nutrition."
+            : "Photo attached. Type the dish name and the nutrition fills in automatically.",
         );
       }
     } catch {
       setDraft(emptyDraft);
       setSource("manual");
-      setNote("Couldn't open that image. Type what you ate below.");
+      setNote("Couldn't open that image. Type the dish name below.");
     }
     setBusy(false);
   }
 
   function startTyping() {
+    setPhoto(null);
     setDraft(emptyDraft);
     setSource("manual");
     setNote("Type the dish name — the nutrition fills in automatically.");
@@ -107,7 +123,7 @@ export default function Meal({ session }: { session: Session }) {
       const est = await db.lookupDish(name);
       if (est.configured && (est.kcal ?? 0) > 0) {
         filled = {
-          label: name, // keep exactly what the member typed
+          label: name,
           kcal: String(est.kcal ?? ""),
           protein_g: String(est.protein_g ?? ""),
           carbs_g: String(est.carbs_g ?? ""),
@@ -118,7 +134,7 @@ export default function Meal({ session }: { session: Session }) {
         setNote(`Matched “${est.label}” · one serving — adjust the numbers for your portion.`);
       } else {
         setSource("manual");
-        setNote("Not in our food list — type the calories and macros yourself, or use a photo.");
+        setNote("Not in our food list — type the calories and macros yourself.");
       }
     } catch {
       setSource("manual");
@@ -128,15 +144,29 @@ export default function Meal({ session }: { session: Session }) {
     return filled;
   }
 
+  function reset() {
+    setDraft(null);
+    setPhoto(null);
+    setSource(null);
+    setNote(null);
+  }
 
   async function logIt() {
     if (!draft || !draft.label.trim()) return;
     let final = draft;
-    // last-chance lookup if the member logs before the auto-fetch resolved
     if (num(final.kcal) === 0) {
       const found = await lookup(final.label);
       if (found) final = found;
       else if (!confirm("No nutrition found for this — log it with 0 calories anyway?")) return;
+    }
+    setBusy(true);
+    let photo_url: string | undefined;
+    if (photo) {
+      try {
+        photo_url = await db.uploadAsset(dataUrlToFile(photo));
+      } catch {
+        /* log without the photo rather than fail */
+      }
     }
     await db.logMeal(mid, {
       label: final.label.trim(),
@@ -144,10 +174,10 @@ export default function Meal({ session }: { session: Session }) {
       protein_g: num(final.protein_g),
       carbs_g: num(final.carbs_g),
       fat_g: num(final.fat_g),
+      photo_url,
     });
-    setDraft(null);
-    setSource(null);
-    setNote(null);
+    setBusy(false);
+    reset();
     await load();
   }
 
@@ -155,32 +185,89 @@ export default function Meal({ session }: { session: Session }) {
   const sum = (k: keyof MealRow) => today.reduce((n, m) => n + (Number(m[k]) || 0), 0);
   const f = (k: keyof Draft, v: string) => setDraft((d) => (d ? { ...d, [k]: v } : d));
 
+  const planTargets = plan && (plan.daily_kcal || plan.protein_g || plan.carbs_g || plan.fat_g);
+
   return (
     <div className="flex flex-col gap-4 pt-1">
       <h1 className="text-xl font-extrabold">Meal log</h1>
 
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
-      <div className="flex gap-2">
+      {plan && (
+        <div className="card p-4 flex flex-col gap-2">
+          <button className="flex items-center gap-2 text-left" onClick={() => setPlanOpen((v) => !v)}>
+            <span className="eyebrow flex-1">Your diet plan{plan.assigned_by ? ` · from ${plan.assigned_by}` : ""}</span>
+            <span className="text-muted text-sm">{planOpen ? "▲" : "▼"}</span>
+          </button>
+          {planTargets && (
+            <div className="grid grid-cols-4 gap-2 text-center">
+              {[
+                ["kcal", plan.daily_kcal, sum("kcal")],
+                ["protein", plan.protein_g, sum("protein_g")],
+                ["carbs", plan.carbs_g, sum("carbs_g")],
+                ["fat", plan.fat_g, sum("fat_g")],
+              ].map(([k, target, got]) => (
+                <div key={k as string}>
+                  <div className="text-sm font-extrabold">
+                    {got}
+                    <span className="text-muted font-semibold text-xs"> / {target ?? "—"}</span>
+                  </div>
+                  <div className="text-[10px] text-muted font-semibold">{k as string}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {planOpen && (
+            <div className="flex flex-col gap-2 pt-1">
+              {plan.meals.map((m) => (
+                <div key={m.slot} className="text-sm">
+                  <span className="font-bold">{m.slot}: </span>
+                  <span className="text-muted">{m.items}</span>
+                </div>
+              ))}
+              {plan.notes && (
+                <p className="text-xs text-muted bg-paper rounded-lg p-2 mt-1">{plan.notes}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFile} />
+      <input ref={galRef} type="file" accept="image/*" className="hidden" onChange={onFile} />
+
+      <div className="grid grid-cols-3 gap-2">
         <button
-          className="flex-1 rounded-2xl h-32 grid place-items-center text-white text-sm font-bold bg-dark disabled:opacity-70"
+          className="rounded-2xl h-28 flex flex-col items-center justify-center gap-1 text-white text-xs font-bold bg-dark disabled:opacity-70"
           disabled={busy}
-          onClick={() => fileRef.current?.click()}
+          onClick={() => camRef.current?.click()}
         >
-          {busy ? "Reading the plate…" : "📷  Photo"}
+          <span className="text-lg">📷</span>
+          {busy ? "Reading…" : "Take photo"}
         </button>
         <button
-          className="flex-1 rounded-2xl h-32 grid place-items-center text-ink text-sm font-bold bg-card border border-line"
+          className="rounded-2xl h-28 flex flex-col items-center justify-center gap-1 text-ink text-xs font-bold bg-card border border-line disabled:opacity-70"
+          disabled={busy}
+          onClick={() => galRef.current?.click()}
+        >
+          <span className="text-lg">🖼️</span>
+          Upload image
+        </button>
+        <button
+          className="rounded-2xl h-28 flex flex-col items-center justify-center gap-1 text-ink text-xs font-bold bg-card border border-line"
           onClick={startTyping}
         >
-          ✍️  Type the dish
+          <span className="text-lg">✍️</span>
+          Type the dish
         </button>
       </div>
       {note && <p className="text-xs text-muted -mt-1">{note}</p>}
 
       {draft && (
         <div className="card p-4 flex flex-col gap-3">
+          {photo && (
+            <img src={photo} alt="meal" className="w-full h-40 object-cover rounded-xl" />
+          )}
           {source === "ai" && (
-            <span className="pill bg-accent-soft text-accent self-start">AI estimate · edit before logging</span>
+            <span className="pill bg-accent-soft text-accent self-start">Read from photo · edit before logging</span>
           )}
           {source === "list" && (
             <span className="pill bg-accent-soft text-accent self-start">From our food list · edit if needed</span>
@@ -218,17 +305,10 @@ export default function Meal({ session }: { session: Session }) {
             <Field label="fat" value={draft.fat_g} onChange={(v) => f("fat_g", v)} suffix="g" />
           </div>
           <div className="flex gap-2">
-            <button className="btn flex-1" disabled={!draft.label.trim()} onClick={logIt}>
-              Add to today's log
+            <button className="btn flex-1" disabled={busy || !draft.label.trim()} onClick={logIt}>
+              {busy ? "Saving…" : "Add to today's log"}
             </button>
-            <button
-              className="btn-ghost"
-              onClick={() => {
-                setDraft(null);
-                setSource(null);
-                setNote(null);
-              }}
-            >
+            <button className="btn-ghost" onClick={reset}>
               Cancel
             </button>
           </div>
@@ -246,8 +326,13 @@ export default function Meal({ session }: { session: Session }) {
         <div className="eyebrow mb-2">Logged today</div>
         <div className="card divide-y divide-line">
           {today.map((m) => (
-            <div key={m.id} className="px-4 py-3 flex items-center justify-between">
-              <span className="text-sm font-semibold">{m.label}</span>
+            <div key={m.id} className="px-4 py-3 flex items-center gap-3">
+              {m.photo_url ? (
+                <img src={m.photo_url} alt="" className="h-10 w-10 rounded-lg object-cover flex-none" />
+              ) : (
+                <div className="h-10 w-10 rounded-lg bg-paper grid place-items-center text-xs flex-none">🍽️</div>
+              )}
+              <span className="text-sm font-semibold flex-1">{m.label}</span>
               <span className="text-xs text-muted">{m.kcal} kcal</span>
             </div>
           ))}

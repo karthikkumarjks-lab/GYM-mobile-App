@@ -250,3 +250,21 @@ grant execute on function auth_is_staff() to authenticated;
 -- Edge functions: supabase/functions/{device-checkin, meal-scan, whatsapp-send,
 --   razorpay-link, create-member, remove-member}. Secrets in supabase/SETUP.md.
 -- create-member / remove-member are owner/admin-only. Members cannot self-register.
+
+-- ---------- diet plans (added later) ----------
+create table if not exists diet_plans (
+  member_id   uuid primary key references members(id) on delete cascade,
+  gym_id      uuid not null references gyms(id) on delete cascade,
+  daily_kcal  int, protein_g int, carbs_g int, fat_g int,
+  notes       text,
+  meals       jsonb not null default '[]',
+  assigned_by text,
+  updated_at  timestamptz default now()
+);
+alter table diet_plans enable row level security;
+create policy diet_read on diet_plans for select using (
+  gym_id = auth_gym_id() and (auth_is_staff() or member_id = auth_member_id())
+);
+create policy diet_write on diet_plans for all
+  using (gym_id = auth_gym_id() and auth_is_staff())
+  with check (gym_id = auth_gym_id() and auth_is_staff());

@@ -9,7 +9,7 @@ import { buildSeed, seedGym } from "./seed";
 import { lookupFood } from "./foods";
 import { hasSupabase, supabase } from "./supabase";
 import type {
-  Checkin, Gym, Meal, Member, MemberWithSignal, Message, Order, OrderItem,
+  Checkin, DietPlan, Gym, Meal, Member, MemberWithSignal, Message, Order, OrderItem,
   Payment, Plan, Product, Session, TeamMember,
 } from "./types";
 
@@ -288,6 +288,20 @@ const mockDb = {
     wr(K.meals, [...rd<Meal[]>(K.meals, []), row]);
     return row;
   },
+  async getDietPlan(memberId: string): Promise<DietPlan | null> {
+    return rd<Record<string, DietPlan>>("mg.diets", {})[memberId] ?? null;
+  },
+  async saveDietPlan(memberId: string, patch: Partial<DietPlan>): Promise<DietPlan> {
+    const g = rd<Gym>(K.gym, seedGym);
+    const all = rd<Record<string, DietPlan>>("mg.diets", {});
+    const base: DietPlan = all[memberId] ?? {
+      member_id: memberId, gym_id: g.id, daily_kcal: null, protein_g: null, carbs_g: null,
+      fat_g: null, notes: null, meals: [], assigned_by: "Gym owner", updated_at: "",
+    };
+    const next: DietPlan = { ...base, ...patch, member_id: memberId, updated_at: new Date().toISOString() };
+    wr("mg.diets", { ...all, [memberId]: next });
+    return next;
+  },
   async scanMeal(_image: string): Promise<MealEstimate> {
     return { configured: false };
   },
@@ -545,6 +559,29 @@ const supaDb = {
       .single();
     if (error) throw error;
     return data as Meal;
+  },
+  async getDietPlan(memberId: string): Promise<DietPlan | null> {
+    const { data } = await supabase.from("diet_plans").select("*").eq("member_id", memberId).maybeSingle();
+    return (data as DietPlan) ?? null;
+  },
+  async saveDietPlan(memberId: string, patch: Partial<DietPlan>): Promise<DietPlan> {
+    const s = getSession();
+    const { data, error } = await supabase
+      .from("diet_plans")
+      .upsert(
+        {
+          member_id: memberId,
+          gym_id: requireGymId(),
+          assigned_by: s?.full_name || "Gym owner",
+          ...patch,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "member_id" },
+      )
+      .select()
+      .single();
+    if (error) throw error;
+    return data as DietPlan;
   },
   async scanMeal(image: string): Promise<MealEstimate> {
     const { data, error } = await supabase.functions.invoke("meal-scan", { body: { image } });
