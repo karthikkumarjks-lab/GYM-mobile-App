@@ -6,6 +6,7 @@
 // Both implementations honour the same `db` contract so the UI never changes.
 
 import { buildSeed, seedGym } from "./seed";
+import { lookupFood } from "./foods";
 import { hasSupabase, supabase } from "./supabase";
 import type {
   Checkin, Gym, Meal, Member, MemberWithSignal, Message, Order, OrderItem,
@@ -290,6 +291,10 @@ const mockDb = {
   async scanMeal(_image: string): Promise<MealEstimate> {
     return { configured: false };
   },
+  async lookupDish(name: string): Promise<MealEstimate> {
+    const hit = lookupFood(name);
+    return hit ? { configured: true, ...hit } : { configured: false, label: name.trim() };
+  },
   async listPayments(): Promise<Payment[]> {
     return rd<Payment[]>("mg.payments", []).sort((a, b) => +new Date(b.created_at) - +new Date(a.created_at));
   },
@@ -545,6 +550,16 @@ const supaDb = {
     const { data, error } = await supabase.functions.invoke("meal-scan", { body: { image } });
     if (error || !data) return { configured: false, error: error?.message };
     return data as MealEstimate;
+  },
+  async lookupDish(name: string): Promise<MealEstimate> {
+    // Prefer an AI estimate when the model is connected; always fall back to the local table.
+    try {
+      const { data } = await supabase.functions.invoke("meal-scan", { body: { text: name } });
+      const est = data as MealEstimate | null;
+      if (est?.configured && est.label && !est.error) return est;
+    } catch { /* fall through to local */ }
+    const hit = lookupFood(name);
+    return hit ? { configured: true, ...hit } : { configured: false, label: name.trim() };
   },
   async listPayments(): Promise<Payment[]> {
     const { data } = await supabase

@@ -5,6 +5,7 @@ import { Loading } from "../components/ui";
 
 type Draft = { label: string; kcal: string; protein_g: string; carbs_g: string; fat_g: string };
 const emptyDraft: Draft = { label: "", kcal: "", protein_g: "", carbs_g: "", fat_g: "" };
+type Source = "ai" | "list" | "manual";
 
 // Downscale a picked image to <=1024px JPEG so the upload stays small.
 function shrink(file: File): Promise<string> {
@@ -29,9 +30,10 @@ export default function Meal({ session }: { session: Session }) {
   const mid = session.member_id!;
   const [meals, setMeals] = useState<MealRow[] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [source, setSource] = useState<"ai" | "manual" | null>(null);
+  const [source, setSource] = useState<Source | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [looking, setLooking] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = () => db.listMeals(mid).then(setMeals);
@@ -75,10 +77,37 @@ export default function Meal({ session }: { session: Session }) {
     setBusy(false);
   }
 
-  function startManual() {
+  function startTyping() {
     setDraft(emptyDraft);
     setSource("manual");
-    setNote(null);
+    setNote("Type the dish name and tap “Get nutrition”.");
+  }
+
+  async function lookup() {
+    const name = draft?.label.trim();
+    if (!name || name.length < 2) return;
+    setLooking(true);
+    try {
+      const est = await db.lookupDish(name);
+      if (est.configured && (est.kcal ?? 0) > 0) {
+        setDraft({
+          label: est.label || name,
+          kcal: String(est.kcal ?? ""),
+          protein_g: String(est.protein_g ?? ""),
+          carbs_g: String(est.carbs_g ?? ""),
+          fat_g: String(est.fat_g ?? ""),
+        });
+        setSource("list");
+        setNote("Estimate for one serving — adjust the numbers if your portion was bigger or smaller.");
+      } else {
+        setSource("manual");
+        setNote("Not in our food list — enter the values yourself, or try a photo.");
+      }
+    } catch {
+      setSource("manual");
+      setNote("Couldn't look that up — enter the values yourself.");
+    }
+    setLooking(false);
   }
 
   async function logIt() {
@@ -115,9 +144,9 @@ export default function Meal({ session }: { session: Session }) {
         </button>
         <button
           className="flex-1 rounded-2xl h-32 grid place-items-center text-ink text-sm font-bold bg-card border border-line"
-          onClick={startManual}
+          onClick={startTyping}
         >
-          ✍️  Type it
+          ✍️  Type the dish
         </button>
       </div>
       {note && <p className="text-xs text-muted -mt-1">{note}</p>}
@@ -127,13 +156,30 @@ export default function Meal({ session }: { session: Session }) {
           {source === "ai" && (
             <span className="pill bg-accent-soft text-accent self-start">AI estimate · edit before logging</span>
           )}
-          <input
-            className="field"
-            placeholder="What did you eat?"
-            value={draft.label}
-            onChange={(e) => f("label", e.target.value)}
-            autoFocus={source === "manual"}
-          />
+          {source === "list" && (
+            <span className="pill bg-accent-soft text-accent self-start">From our food list · edit if needed</span>
+          )}
+          <div className="flex gap-2">
+            <input
+              className="field flex-1"
+              placeholder="e.g. masala dosa, 2 rotis + dal"
+              value={draft.label}
+              onChange={(e) => f("label", e.target.value)}
+              onBlur={() => {
+                if (source !== "ai" && !draft.kcal) void lookup();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void lookup();
+                }
+              }}
+              autoFocus={source === "manual"}
+            />
+            <button type="button" className="btn-ghost whitespace-nowrap" disabled={looking} onClick={lookup}>
+              {looking ? "…" : "Get nutrition"}
+            </button>
+          </div>
           <div className="grid grid-cols-4 gap-2">
             <Field label="kcal" value={draft.kcal} onChange={(v) => f("kcal", v)} />
             <Field label="protein" value={draft.protein_g} onChange={(v) => f("protein_g", v)} suffix="g" />
