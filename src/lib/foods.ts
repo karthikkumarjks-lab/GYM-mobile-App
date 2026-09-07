@@ -754,4 +754,40 @@ function estimateFood(query: string, qt: string[]): FoodMacros | null {
   };
 }
 
+const isEstimate = (label: string) => /\(estimate\)\s*$/i.test(label);
+const stripEstimate = (label: string) => label.replace(/\s*\(estimate\)\s*$/i, "");
+
+/**
+ * Look up a meal that may be several items — "dosa + sambar", "chicken curry with rice",
+ * "rice, dal and papad". Tries the whole string first; if that isn't a clean table hit,
+ * splits on +/,/&/and/with/plus and sums the parts. Falls back to lookupFood otherwise.
+ */
+export function lookupMeal(query: string): FoodMacros | null {
+  const whole = lookupFood(query);
+  // an exact table hit for the whole string → one dish, don't split it
+  if (whole && !isEstimate(whole.label) && norm(query) === norm(whole.label)) return whole;
+
+  const parts = query
+    .split(/\s*(?:\+|,|&|\/|\band\b|\bwith\b|\bplus\b|\bside\b)\s*/i)
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 3);
+
+  if (parts.length >= 2) {
+    const hits = parts.map((p) => lookupFood(p)).filter((h): h is FoodMacros => !!h);
+    // need most parts to resolve, and at least one to be a real (non-estimate) food
+    if (hits.length >= 2 && hits.length >= parts.length - 1) {
+      const sum = (k: keyof FoodMacros) => hits.reduce((n, h) => n + (h[k] as number), 0);
+      const anyEst = hits.some((h) => isEstimate(h.label));
+      return {
+        label: hits.map((h) => stripEstimate(h.label)).join(" + ") + (anyEst ? " (estimate)" : ""),
+        kcal: Math.round(sum("kcal")),
+        protein_g: Math.round(sum("protein_g")),
+        carbs_g: Math.round(sum("carbs_g")),
+        fat_g: Math.round(sum("fat_g")),
+      };
+    }
+  }
+  return whole;
+}
+
 export const FOOD_COUNT = FOODS.length;

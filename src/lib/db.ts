@@ -6,7 +6,7 @@
 // Both implementations honour the same `db` contract so the UI never changes.
 
 import { buildSeed, seedGym } from "./seed";
-import { lookupFood } from "./foods";
+import { lookupMeal } from "./foods";
 import { hasSupabase, supabase } from "./supabase";
 import type {
   Checkin, DietPlan, Gym, Meal, Member, MemberWithSignal, Message, Order, OrderItem,
@@ -306,7 +306,7 @@ const mockDb = {
     return { configured: false };
   },
   async lookupDish(name: string): Promise<MealEstimate> {
-    const hit = lookupFood(name);
+    const hit = lookupMeal(name);
     return hit ? { configured: true, ...hit } : { configured: false, label: name.trim() };
   },
   async listPayments(): Promise<Payment[]> {
@@ -595,7 +595,7 @@ const supaDb = {
       const est = data as MealEstimate | null;
       if (est?.configured && est.label && !est.error) return est;
     } catch { /* fall through to local */ }
-    const hit = lookupFood(name);
+    const hit = lookupMeal(name);
     return hit ? { configured: true, ...hit } : { configured: false, label: name.trim() };
   },
   async listPayments(): Promise<Payment[]> {

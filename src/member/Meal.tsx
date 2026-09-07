@@ -88,7 +88,8 @@ export default function Meal({ session }: { session: Session }) {
           fat_g: String(est.fat_g ?? ""),
         });
         setSource("ai");
-        setNote("Read from your photo — adjust the portion if it looks off, then log it.");
+        lastLookup.current = est.label;
+        setNote("Read from your photo — fix the dish name if it's wrong, or adjust the portion, then log it.");
       } else {
         setDraft(emptyDraft);
         setSource("manual");
@@ -267,36 +268,44 @@ export default function Meal({ session }: { session: Session }) {
             <img src={photo} alt="meal" className="w-full h-40 object-cover rounded-xl" />
           )}
           {source === "ai" && (
-            <span className="pill bg-accent-soft text-accent self-start">Read from photo · edit before logging</span>
+            <span className="pill bg-accent-soft text-accent self-start">
+              Detected from photo · fix the name below if it's wrong
+            </span>
           )}
           {source === "list" && (
             <span className="pill bg-accent-soft text-accent self-start">From our food list · edit if needed</span>
           )}
-          <div className="flex gap-2">
-            <input
-              className="field flex-1"
-              placeholder="e.g. chicken biryani, masala dosa, 2 rotis + dal"
-              value={draft.label}
-              onChange={(e) => f("label", e.target.value)}
-              onBlur={() => {
-                if (source !== "ai" && !draft.kcal) void lookup(draft.label);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void lookup(draft.label);
-                }
-              }}
-              autoFocus={source === "manual"}
-            />
-            <button
-              type="button"
-              className="btn-ghost whitespace-nowrap"
-              disabled={looking}
-              onClick={() => lookup(draft.label)}
-            >
-              {looking ? "…" : "Get nutrition"}
-            </button>
+          <div className="flex flex-col gap-1">
+            <div className="flex gap-2">
+              <input
+                className="field flex-1"
+                placeholder="e.g. chicken curry + rice, dosa + sambar"
+                value={draft.label}
+                onChange={(e) => f("label", e.target.value)}
+                onBlur={() => {
+                  const n = draft.label.trim();
+                  if (n.length >= 3 && n !== lastLookup.current) void lookup(n);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void lookup(draft.label);
+                  }
+                }}
+                autoFocus={source === "manual"}
+              />
+              <button
+                type="button"
+                className="btn-ghost whitespace-nowrap"
+                disabled={looking}
+                onClick={() => lookup(draft.label)}
+              >
+                {looking ? "…" : "Get nutrition"}
+              </button>
+            </div>
+            <p className="text-[10px] text-muted">
+              Add a side dish with “+” — e.g. “2 roti + dal” — and we’ll add up the nutrition.
+            </p>
           </div>
           <div className="grid grid-cols-4 gap-2">
             <Field label="kcal" value={draft.kcal} onChange={(v) => f("kcal", v)} />
