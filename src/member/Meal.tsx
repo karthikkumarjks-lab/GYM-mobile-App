@@ -80,18 +80,25 @@ export default function Meal({ session }: { session: Session }) {
       const dataUrl = await shrink(file);
       setPhoto(dataUrl);
       const est = await db.scanMeal(dataUrl);
-      if (est.configured && est.label && !est.error) {
-        setDraft({
-          label: est.label,
-          kcal: String(est.kcal ?? ""),
-          protein_g: String(est.protein_g ?? ""),
-          carbs_g: String(est.carbs_g ?? ""),
-          fat_g: String(est.fat_g ?? ""),
-        });
-        setSource("ai");
-        setOrigin("ai");
-        lastLookup.current = est.label;
-        setNote("Read from your photo — fix the dish name if it's wrong, or adjust the portion, then log it.");
+      if (est.configured && est.label && !est.error && !/not a meal/i.test(est.label)) {
+        // the model named the dish — prefer the food table's numbers for that name,
+        // fall back to the model's own estimate only if the table has nothing.
+        const viaList = await lookup(est.label);
+        if (!viaList) {
+          setDraft({
+            label: est.label,
+            kcal: String(est.kcal ?? ""),
+            protein_g: String(est.protein_g ?? ""),
+            carbs_g: String(est.carbs_g ?? ""),
+            fat_g: String(est.fat_g ?? ""),
+          });
+          setSource("ai");
+          setOrigin("ai");
+          lastLookup.current = est.label;
+          setNote("Read from your photo — fix the dish name if it's wrong, or adjust the portion, then log it.");
+        } else {
+          setNote(`Photo read as “${est.label}” — fix the name if it's wrong, then log it.`);
+        }
       } else {
         setDraft(emptyDraft);
         setSource("manual");

@@ -7,7 +7,7 @@ Project: `myogttnqpvmhvfjvdtaq` · schema in `schema.sql` (already applied).
 | Function | Auth | Purpose | Secrets needed to go live |
 |---|---|---|---|
 | `device-checkin` | webhook secret | Biometric device → check-in | none (uses service role) |
-| `meal-scan` | member JWT | Photo → macros via Claude vision | `ANTHROPIC_API_KEY` |
+| `meal-scan` | member JWT | Photo → dish name (client then pulls macros from the food table) | `GEMINI_API_KEY` (free) or `ANTHROPIC_API_KEY` |
 | `whatsapp-send` | owner JWT | Send a WhatsApp message | `WHATSAPP_TOKEN`, `WHATSAPP_PHONE_ID` |
 | `razorpay-link` | owner JWT | Create a fee payment link | `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` |
 
@@ -26,8 +26,12 @@ supabase secrets set RAZORPAY_KEY_ID=rzp_test_... RAZORPAY_KEY_SECRET=...
 
 ### Where to get each
 
-- **ANTHROPIC_API_KEY** — console.anthropic.com → API keys. Meal-scan uses `claude-opus-5`;
-  edit `meal-scan/index.ts` to `claude-haiku-4-5` for ~5× lower cost per photo.
+- **GEMINI_API_KEY** (recommended for testing — free) — https://aistudio.google.com/apikey,
+  sign in with a Google account, "Create API key". Free tier is ~15 requests/min, 1500/day,
+  no card. `meal-scan` uses `gemini-2.0-flash`. Note: Google may use free-tier data for
+  training — fine for testing, revisit before production.
+- **ANTHROPIC_API_KEY** (paid alternative) — console.anthropic.com → API keys. If set and
+  `GEMINI_API_KEY` is not, `meal-scan` uses `claude-haiku-4-5`.
 - **WHATSAPP_TOKEN / WHATSAPP_PHONE_ID** — developers.facebook.com → your app → WhatsApp →
   API Setup. The temporary token + test number work immediately; a permanent token needs
   business verification. Proactive win-back messages need an approved message template
